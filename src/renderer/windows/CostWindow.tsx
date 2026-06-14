@@ -17,6 +17,7 @@ export default function CostWindow({ onNavigate }: Props) {
   const state = useEnergyStore()
   const [selectedId, setSelectedId] = useState<string>(state.selectedPlanId || state.costPlans[1].id)
   const [viewMode, setViewMode] = useState<'preset' | 'saved'>('preset')
+  const publishedPlan = state.savedPlans.find((p) => p.id === state.publishedPlanId)
 
   const allPlans = useMemo(() => {
     if (viewMode === 'preset') return state.costPlans
@@ -239,6 +240,7 @@ export default function CostWindow({ onNavigate }: Props) {
       <div className="toolbar">
         <span className="toolbar-title">📋 方案明细对比表</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {publishedPlan && <span className="tag tag-green" title={`发布人 ${publishedPlan.publishedBy}`}>🚀 执行版：{publishedPlan.name}</span>}
           <select value={viewMode} onChange={(e) => { setViewMode(e.target.value as 'preset' | 'saved'); setSelectedId('') }} style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}>
             <option value="preset">预设方案对比</option>
             <option value="saved">已保存方案快照</option>

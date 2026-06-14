@@ -11,6 +11,7 @@ import type {
   StorageSchedule,
   SchedulePlan,
   CostPlan,
+  UiState,
 } from '@shared/types'
 import { createInitialState } from '@shared/mockData'
 
@@ -34,8 +35,10 @@ type StoreState = AppState & {
   addReviewRecord: (record: ReviewRecord) => void
   updateReviewRecord: (record: ReviewRecord) => void
   setSelectedPlan: (id: string | null) => void
+  setComparePlanIds: (ids: [string, string] | null) => void
   savePlan: (name: string, note: string) => void
   loadPlan: (id: string) => void
+  publishPlan: (id: string, publisher: string) => void
   deletePlan: (id: string) => void
   applyPartial: (partial: Partial<StoreState>) => void
   resetAll: () => void
@@ -49,7 +52,14 @@ function debouncedBroadcast(getState: () => StoreState) {
   if (broadcastTimer) clearTimeout(broadcastTimer)
   broadcastTimer = setTimeout(() => {
     const full = getState()
-    const { _syncing, initFromPersisted, applyPartial, resetAll, updateSchedule, addSchedule, removeSchedule, updateStorageSchedule, resolveAlert, addAlert, updateAlert, addWorkOrder, updateWorkOrder, removeWorkOrder, updateEquipment, addEquipment, updateWorkshop, addReviewRecord, updateReviewRecord, setSelectedPlan, savePlan, loadPlan, deletePlan, ...cleanState } = full
+    const {
+      _syncing, initFromPersisted, applyPartial, resetAll,
+      updateSchedule, addSchedule, removeSchedule, updateStorageSchedule,
+      resolveAlert, addAlert, updateAlert, addWorkOrder, updateWorkOrder, removeWorkOrder,
+      updateEquipment, addEquipment, updateWorkshop, addReviewRecord, updateReviewRecord,
+      setSelectedPlan, setComparePlanIds, savePlan, loadPlan, publishPlan, deletePlan,
+      ...cleanState
+    } = full
     window.electronAPI!.sendStoreUpdate(pendingPartial, cleanState)
     pendingPartial = {}
     broadcastTimer = null
@@ -131,7 +141,8 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
   },
 
   resetAll: () => {
-    set({ ...createInitialState(), selectedPlanId: null, _syncing: false })
+    const init = createInitialState()
+    set({ ...init, selectedPlanId: null, _syncing: false })
   },
 
   updateSchedule: (item) =>
@@ -167,17 +178,16 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
   updateStorageSchedule: (st) =>
     set((s) => {
       const storageSchedules = s.storageSchedules.map((x) => (x.id === st.id ? st : x))
-      const idx = s.storageSchedules.findIndex((x) => x.id === st.id)
-      const suffix = idx >= 0 ? String(idx + 1) : st.id.slice(-1)
-      const chargeItem = s.schedules.find((x) => x.type === 'storage' && x.power < 0 && x.id.endsWith(suffix))
-      const dischargeItem = s.schedules.find((x) => x.type === 'storage' && x.power > 0 && x.id.endsWith(suffix))
-      let schedules = s.schedules
-      if (chargeItem) {
-        schedules = schedules.map((x) => x.id === chargeItem.id ? { ...x, startHour: st.chargeStart, endHour: st.chargeEnd, name: `储能组#${suffix} 充电` } : x)
-      }
-      if (dischargeItem) {
-        schedules = schedules.map((x) => x.id === dischargeItem.id ? { ...x, startHour: st.dischargeStart, endHour: st.dischargeEnd, name: `储能组#${suffix} 放电` } : x)
-      }
+      const storageIdx = s.storageSchedules.findIndex((x) => x.id === st.id)
+      const gIdx = storageIdx >= 0 ? storageIdx : undefined
+      const schedules = s.schedules.map((x) => {
+        if (x.type !== 'storage' || x.storageGroupIdx !== gIdx) return x
+        if (x.power < 0) {
+          return { ...x, startHour: st.chargeStart, endHour: st.chargeEnd, name: `储能组#${(gIdx ?? 0) + 1} 充电` }
+        } else {
+          return { ...x, startHour: st.dischargeStart, endHour: st.dischargeEnd, name: `储能组#${(gIdx ?? 0) + 1} 放电` }
+        }
+      })
       if (!s._syncing && window.electronAPI) {
         pendingPartial = { ...pendingPartial, storageSchedules, schedules }
         debouncedBroadcast(get)
@@ -277,7 +287,8 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
 
   addReviewRecord: (record) =>
     set((s) => {
-      const reviewRecords = [record, ...s.reviewRecords]
+      const relatedPlanId = record.relatedPlanId ?? s.activePlanId ?? s.publishedPlanId
+      const reviewRecords = [{ ...record, relatedPlanId }, ...s.reviewRecords]
       if (!s._syncing && window.electronAPI) {
         pendingPartial = { ...pendingPartial, reviewRecords }
         debouncedBroadcast(get)
@@ -309,6 +320,16 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
       return { selectedPlanId: id }
     }),
 
+  setComparePlanIds: (ids) =>
+    set((s) => {
+      const uiState: UiState = { ...s.uiState, comparePlanIds: ids }
+      if (!s._syncing && window.electronAPI) {
+        pendingPartial = { ...pendingPartial, uiState }
+        debouncedBroadcast(get)
+      }
+      return { uiState }
+    }),
+
   savePlan: (name, note) =>
     set((s) => {
       const costSnapshot = computeCostFromSchedules(s.schedules, s.storageSchedules, s.energyPrice)
@@ -320,6 +341,8 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
         storageSchedules: JSON.parse(JSON.stringify(s.storageSchedules)),
         costSnapshot: { ...costSnapshot, name },
         createdAt: Date.now(),
+        publishedAt: 0,
+        publishedBy: '',
       }
       const savedPlans = [...s.savedPlans, plan]
       const activePlanId = plan.id
@@ -344,15 +367,41 @@ export const useEnergyStore = create<StoreState>((set, get) => ({
       return { schedules, storageSchedules, activePlanId }
     }),
 
+  publishPlan: (id, publisher) =>
+    set((s) => {
+      const savedPlans = s.savedPlans.map((p) =>
+        p.id === id ? { ...p, publishedAt: Date.now(), publishedBy: publisher } : p
+      )
+      const plan = savedPlans.find((p) => p.id === id)
+      const publishedPlanId = id
+      let schedules = s.schedules
+      let storageSchedules = s.storageSchedules
+      let activePlanId = s.activePlanId || id
+      if (plan) {
+        schedules = JSON.parse(JSON.stringify(plan.schedules))
+        storageSchedules = JSON.parse(JSON.stringify(plan.storageSchedules))
+      }
+      if (!s._syncing && window.electronAPI) {
+        pendingPartial = { ...pendingPartial, savedPlans, publishedPlanId, schedules, storageSchedules, activePlanId }
+        debouncedBroadcast(get)
+      }
+      return { savedPlans, publishedPlanId, schedules, storageSchedules, activePlanId }
+    }),
+
   deletePlan: (id) =>
     set((s) => {
       const savedPlans = s.savedPlans.filter((p) => p.id !== id)
       const activePlanId = s.activePlanId === id ? null : s.activePlanId
+      const publishedPlanId = s.publishedPlanId === id ? null : s.publishedPlanId
+      let uiState = s.uiState
+      if (uiState.comparePlanIds && (uiState.comparePlanIds[0] === id || uiState.comparePlanIds[1] === id)) {
+        uiState = { ...uiState, comparePlanIds: null }
+      }
       if (!s._syncing && window.electronAPI) {
-        pendingPartial = { ...pendingPartial, savedPlans, activePlanId }
+        pendingPartial = { ...pendingPartial, savedPlans, activePlanId, publishedPlanId, uiState }
         debouncedBroadcast(get)
       }
-      return { savedPlans, activePlanId }
+      return { savedPlans, activePlanId, publishedPlanId, uiState }
     }),
 }))
 

@@ -88,6 +88,10 @@ export default function AlertsWindow({ onNavigate }: Props) {
 
       <div className="toolbar">
         <span className="toolbar-title">🔍 筛选</span>
+        {state.publishedPlanId && (() => {
+          const p = state.savedPlans.find((x) => x.id === state.publishedPlanId)
+          return p ? <span className="tag tag-green" style={{ marginLeft: 12 }}>🚀 执行方案：{p.name}</span> : null
+        })()}
         <div className="tabs">
           {[
             { k: 'all', t: `全部 (${stats.unresolved})` },

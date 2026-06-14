@@ -4,10 +4,47 @@ export function createInitialState(): AppState {
   const today = new Date()
   const dateStr = today.toISOString().split('T')[0]
 
+  const defaultSchedules = [
+    { id: 'sc1', type: 'equipment' as const, name: 'CNC加工中心#1', startHour: 8, endHour: 14, power: 75, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc2', type: 'equipment' as const, name: 'CNC加工中心#2', startHour: 10, endHour: 14, power: 75, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc3', type: 'equipment' as const, name: '注塑机#1', startHour: 9, endHour: 14, power: 120, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc4', type: 'equipment' as const, name: '焊接机器人#1', startHour: 7, endHour: 14, power: 90, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc5', type: 'equipment' as const, name: '焊接机器人#2', startHour: 13, endHour: 19, power: 90, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc6', type: 'equipment' as const, name: '装配流水线', startHour: 8, endHour: 16, power: 60, resource: 'electricity' as const, color: '#3B82F6' },
+    { id: 'sc_charge_1', type: 'storage' as const, name: '储能组#1 充电', startHour: 0, endHour: 6, power: -500, resource: 'storage' as const, color: '#10B981', storageGroupIdx: 0 },
+    { id: 'sc_discharge_1', type: 'storage' as const, name: '储能组#1 放电', startHour: 9, endHour: 12, power: 400, resource: 'storage' as const, color: '#F59E0B', storageGroupIdx: 0 },
+    { id: 'sc_charge_2', type: 'storage' as const, name: '储能组#2 充电', startHour: 12, endHour: 14, power: -400, resource: 'storage' as const, color: '#14B8A6', storageGroupIdx: 1 },
+    { id: 'sc_discharge_2', type: 'storage' as const, name: '储能组#2 放电', startHour: 18, endHour: 21, power: 320, resource: 'storage' as const, color: '#FB923C', storageGroupIdx: 1 },
+    { id: 'sc9', type: 'boiler' as const, name: '燃气锅炉运行', startHour: 6, endHour: 20, power: 0, resource: 'steam' as const, color: '#EF4444' },
+    { id: 'sc10', type: 'compressor' as const, name: '空压机#1运行', startHour: 7, endHour: 23, power: 110, resource: 'compressedAir' as const, color: '#8B5CF6' },
+    { id: 'sc11', type: 'compressor' as const, name: '空压机#2运行', startHour: 9, endHour: 18, power: 110, resource: 'compressedAir' as const, color: '#8B5CF6' },
+  ]
+
+  const defaultStorage = [
+    { id: 'st1', chargeStart: 0, chargeEnd: 6, dischargeStart: 9, dischargeEnd: 12, capacity: 3000, currentLevel: 2100 },
+    { id: 'st2', chargeStart: 12, chargeEnd: 14, dischargeStart: 18, dischargeEnd: 21, capacity: 2000, currentLevel: 1200 },
+  ]
+
+  const demoPlanId = 'plan_demo'
+  const demoPlan = {
+    id: demoPlanId,
+    name: '初始标准方案',
+    note: '系统启动时的默认排程，作为基线参考方案',
+    schedules: JSON.parse(JSON.stringify(defaultSchedules)),
+    storageSchedules: JSON.parse(JSON.stringify(defaultStorage)),
+    costSnapshot: { id: 'cp_demo', name: '初始标准方案', totalCost: 63420, electricityCost: 38200, steamCost: 17600, airCost: 7620, carbonEmission: 14.3, riskLevel: 'medium', peakDemand: 2680, description: '默认基线方案' },
+    createdAt: Date.now() - 172800000,
+    publishedAt: Date.now() - 86400000,
+    publishedBy: '系统管理员',
+  }
+
   return {
     currentDate: dateStr,
     demandRedLine: 2800,
     todayTotalLoad: 2156,
+    publishedPlanId: demoPlanId,
+    activePlanId: null,
+    uiState: { comparePlanIds: null },
     energyPrice: {
       electricity: [
         0.35, 0.35, 0.35, 0.35, 0.35, 0.35,
@@ -79,23 +116,8 @@ export function createInitialState(): AppState {
         isRainy: Math.random() > 0.75,
       }
     }),
-    schedules: [
-      { id: 'sc1', type: 'equipment', name: 'CNC加工中心#1', startHour: 8, endHour: 14, power: 75, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc2', type: 'equipment', name: 'CNC加工中心#2', startHour: 10, endHour: 14, power: 75, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc3', type: 'equipment', name: '注塑机#1', startHour: 9, endHour: 14, power: 120, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc4', type: 'equipment', name: '焊接机器人#1', startHour: 7, endHour: 14, power: 90, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc5', type: 'equipment', name: '焊接机器人#2', startHour: 13, endHour: 19, power: 90, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc6', type: 'equipment', name: '装配流水线', startHour: 8, endHour: 16, power: 60, resource: 'electricity', color: '#3B82F6' },
-      { id: 'sc7', type: 'storage', name: '储能系统充电', startHour: 0, endHour: 6, power: -500, resource: 'storage', color: '#10B981' },
-      { id: 'sc8', type: 'storage', name: '储能系统放电', startHour: 9, endHour: 12, power: 400, resource: 'storage', color: '#F59E0B' },
-      { id: 'sc9', type: 'boiler', name: '燃气锅炉运行', startHour: 6, endHour: 20, power: 0, resource: 'steam', color: '#EF4444' },
-      { id: 'sc10', type: 'compressor', name: '空压机#1运行', startHour: 7, endHour: 23, power: 110, resource: 'compressedAir', color: '#8B5CF6' },
-      { id: 'sc11', type: 'compressor', name: '空压机#2运行', startHour: 9, endHour: 18, power: 110, resource: 'compressedAir', color: '#8B5CF6' },
-    ],
-    storageSchedules: [
-      { id: 'st1', chargeStart: 0, chargeEnd: 6, dischargeStart: 9, dischargeEnd: 12, capacity: 3000, currentLevel: 2100 },
-      { id: 'st2', chargeStart: 12, chargeEnd: 14, dischargeStart: 18, dischargeEnd: 21, capacity: 2000, currentLevel: 1200 },
-    ],
+    schedules: defaultSchedules,
+    storageSchedules: defaultStorage,
     alerts: [
       { id: 'a1', level: 'critical', category: 'overDemand', title: '尖峰负荷超限预警', message: '预计10:00-11:00时段用电负荷将达到2950kW，超过需量红线2800kW，建议调整设备开机时间或启动储能放电。', timestamp: Date.now() - 3600000, resolved: false, relatedItemId: 'sc1' },
       { id: 'a2', level: 'warning', category: 'lowEfficiency', title: '四车间涂装线效率偏低', message: '涂装烘干炉综合效率76%，低于行业基准85%，建议检查保温层和燃烧系统。', timestamp: Date.now() - 7200000, resolved: false, relatedItemId: 'e9' },
@@ -109,18 +131,17 @@ export function createInitialState(): AppState {
       { id: 'cp3', name: '极致节能方案', totalCost: 52380, electricityCost: 29500, steamCost: 16200, airCost: 6680, carbonEmission: 11.5, riskLevel: 'high', peakDemand: 2350, description: '最大程度错峰，部分订单延迟至夜班' },
     ],
     reviewRecords: [
-      { id: 'r1', date: '2026-06-13', plannedLoad: 20800, actualLoad: 21560, deviation: 760, deviationRate: 3.65, plannedCost: 65800, actualCost: 68520, reason: '午间气温偏高，空调负荷增加；订单C焊接工作量超出预期', notes: '建议增加环境温度对负荷预测的权重系数', approval: 'approved', approver: '张主管', approvalRemark: '偏差原因分析清楚，改进建议合理，同意通过。后续重点优化温度系数。', approvalAt: Date.now() - 82800000, createdAt: Date.now() - 86400000, history: [
+      { id: 'r1', date: '2026-06-13', relatedPlanId: demoPlanId, plannedLoad: 20800, actualLoad: 21560, deviation: 760, deviationRate: 3.65, plannedCost: 65800, actualCost: 68520, reason: '午间气温偏高，空调负荷增加；订单C焊接工作量超出预期', notes: '建议增加环境温度对负荷预测的权重系数', approval: 'approved', approver: '张主管', approvalRemark: '偏差原因分析清楚，改进建议合理，同意通过。后续重点优化温度系数。', approvalAt: Date.now() - 82800000, createdAt: Date.now() - 86400000, history: [
         { timestamp: Date.now() - 86400000, field: '偏差原因', oldValue: '', newValue: '午间气温偏高，空调负荷增加；订单C焊接工作量超出预期', operator: '操作员' },
         { timestamp: Date.now() - 82800000, field: '审批状态', oldValue: 'pending', newValue: 'approved', operator: '张主管' },
         { timestamp: Date.now() - 82800000, field: '审批意见', oldValue: '', newValue: '偏差原因分析清楚，改进建议合理，同意通过。后续重点优化温度系数。', operator: '张主管' },
       ] },
-      { id: 'r2', date: '2026-06-12', plannedLoad: 19500, actualLoad: 18920, deviation: -580, deviationRate: -2.97, plannedCost: 61200, actualCost: 59800, reason: 'CNC#2下午因换刀停机1.5小时，涂装线维护提前完成', notes: '换刀计划需纳入排程模型', approval: 'approved', approver: '张主管', approvalRemark: '整体控制良好，节约费用值得肯定。换刀计划已排产系统需求同步。', approvalAt: Date.now() - 169200000, createdAt: Date.now() - 172800000, history: [
+      { id: 'r2', date: '2026-06-12', relatedPlanId: null, plannedLoad: 19500, actualLoad: 18920, deviation: -580, deviationRate: -2.97, plannedCost: 61200, actualCost: 59800, reason: 'CNC#2下午因换刀停机1.5小时，涂装线维护提前完成', notes: '换刀计划需纳入排程模型', approval: 'approved', approver: '张主管', approvalRemark: '整体控制良好，节约费用值得肯定。换刀计划已排产系统需求同步。', approvalAt: Date.now() - 169200000, createdAt: Date.now() - 172800000, history: [
         { timestamp: Date.now() - 172800000, field: '偏差原因', oldValue: '', newValue: 'CNC#2下午因换刀停机1.5小时，涂装线维护提前完成', operator: '操作员' },
         { timestamp: Date.now() - 169200000, field: '审批状态', oldValue: 'pending', newValue: 'approved', operator: '张主管' },
       ] },
-      { id: 'r3', date: '2026-06-11', plannedLoad: 22300, actualLoad: 23150, deviation: 850, deviationRate: 3.81, plannedCost: 69500, actualCost: 72100, reason: '注塑机#2临时启用处理紧急订单，锅炉超负荷运行', notes: '紧急订单需预留备用容量', approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now() - 259200000, history: [] },
+      { id: 'r3', date: '2026-06-11', relatedPlanId: null, plannedLoad: 22300, actualLoad: 23150, deviation: 850, deviationRate: 3.81, plannedCost: 69500, actualCost: 72100, reason: '注塑机#2临时启用处理紧急订单，锅炉超负荷运行', notes: '紧急订单需预留备用容量', approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now() - 259200000, history: [] },
     ],
-    savedPlans: [],
-    activePlanId: null,
+    savedPlans: [demoPlan],
   }
 }

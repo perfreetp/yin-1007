@@ -21,18 +21,14 @@ export default function ReviewWindow({ onNavigate }: Props) {
   const [editNotes, setEditNotes] = useState('')
   const [approver, setApprover] = useState('')
   const [approvalRemark, setApprovalRemark] = useState('')
-  const [planFilter, setPlanFilter] = useState<string>('all')
+  const [planFilter, setPlanFilter] = useState<string>(state.publishedPlanId || state.activePlanId || 'all')
 
   const selected = state.reviewRecords.find((r) => r.id === selectedId)
 
   const filteredRecords = useMemo(() => {
     if (planFilter === 'all') return state.reviewRecords
-    return state.reviewRecords.filter((r) => {
-      const plan = state.savedPlans.find((p) => p.id === planFilter)
-      if (!plan) return true
-      return r.createdAt >= plan.createdAt - 86400000 && r.createdAt <= plan.createdAt + 86400000
-    })
-  }, [state.reviewRecords, planFilter, state.savedPlans])
+    return state.reviewRecords.filter((r) => r.relatedPlanId === planFilter)
+  }, [state.reviewRecords, planFilter])
 
   const newRecord: Partial<ReviewRecord> = {
     date: state.currentDate,
@@ -149,13 +145,14 @@ export default function ReviewWindow({ onNavigate }: Props) {
   const fmtTime = (ts: number) => ts ? new Date(ts).toLocaleString('zh-CN') : '-'
 
   const exportReport = () => {
+    const planName = (id: string | null) => id ? (state.savedPlans.find((p) => p.id === id)?.name || id) : '（未绑定）'
     const headers = [
-      '日期', '计划负荷(kWh)', '实际负荷(kWh)', '偏差(kWh)', '偏差率(%)',
+      '关联方案', '日期', '计划负荷(kWh)', '实际负荷(kWh)', '偏差(kWh)', '偏差率(%)',
       '计划费用(¥)', '实际费用(¥)', '费用差异(¥)', '偏差原因', '改进备注',
       '审批状态', '审批人', '审批意见', '审批时间', '创建时间', '修改留痕',
     ]
     const rows = filteredRecords.map((r) => [
-      r.date, r.plannedLoad, r.actualLoad, r.deviation, r.deviationRate.toFixed(2) + '%',
+      planName(r.relatedPlanId), r.date, r.plannedLoad, r.actualLoad, r.deviation, r.deviationRate.toFixed(2) + '%',
       r.plannedCost, r.actualCost, r.actualCost - r.plannedCost,
       r.reason, r.notes,
       APPROVAL_LABELS[r.approval].text, r.approver || '-', r.approvalRemark || '-',
@@ -230,7 +227,9 @@ export default function ReviewWindow({ onNavigate }: Props) {
           <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}>
             <option value="all">全部复盘</option>
             {state.savedPlans.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <option key={p.id} value={p.id}>
+                {state.publishedPlanId === p.id ? '🚀 ' : ''}{state.activePlanId === p.id ? '📋 ' : ''}{p.name} ({state.reviewRecords.filter((r) => r.relatedPlanId === p.id).length}条)
+              </option>
             ))}
           </select>
         </div>
@@ -299,8 +298,12 @@ export default function ReviewWindow({ onNavigate }: Props) {
               <div className="card-subtitle">{selected ? `编号：${selected.id}` : '请在左侧选择一条记录'}</div>
             </div>
             {selected && (
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <span className={`tag ${APPROVAL_LABELS[selected.approval].cls}`}>{APPROVAL_LABELS[selected.approval].text}</span>
+                {selected.relatedPlanId && (() => {
+                  const p = state.savedPlans.find((x) => x.id === selected.relatedPlanId)
+                  return <span className="tag tag-blue">📋 {p ? p.name : '方案已删除'}</span>
+                })()}
                 {selected.approver && <span className="tag tag-blue">审批人：{selected.approver}</span>}
               </div>
             )}
@@ -490,6 +493,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
                 if (!pl || !al || !pc || !ac) return alert('请填写完整数值')
                 const rec: ReviewRecord = {
                   id: `r_${Date.now()}`, date: newRecord.date!,
+                  relatedPlanId: planFilter === 'all' ? state.activePlanId || state.publishedPlanId : planFilter,
                   plannedLoad: pl, actualLoad: al,
                   deviation: al - pl, deviationRate: ((al - pl) / pl) * 100,
                   plannedCost: pc, actualCost: ac,

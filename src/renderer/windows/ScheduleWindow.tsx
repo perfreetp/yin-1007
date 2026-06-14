@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { Line } from 'react-chartjs-2'
 import { useEnergyStore } from '../store/useEnergyStore'
 import type { WindowKey, ScheduleItem } from '@shared/types'
@@ -7,7 +7,7 @@ interface Props {
   onNavigate?: (key: WindowKey) => void
 }
 
-const LABEL_WIDTH = 160
+const LABEL_WIDTH = 170
 const HOUR_WIDTH = 40
 const ROW_HEIGHT = 44
 const TOTAL_HOURS = 24
@@ -27,10 +27,18 @@ export default function ScheduleWindow({ onNavigate }: Props) {
   const [showStoragePanel, setShowStoragePanel] = useState(false)
   const [showPlanPanel, setShowPlanPanel] = useState(false)
   const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [showPublishDialog, setShowPublishDialog] = useState(false)
+  const [publishPublisher, setPublishPublisher] = useState('')
   const [planName, setPlanName] = useState('')
   const [planNote, setPlanNote] = useState('')
-  const [compareIds, setCompareIds] = useState<[string, string] | null>(null)
+  const [localCompareIds, setLocalCompareIds] = useState<[string, string] | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (state.uiState.comparePlanIds && !localCompareIds) {
+      setLocalCompareIds(state.uiState.comparePlanIds)
+    }
+  }, [state.uiState.comparePlanIds])
 
   const sortedSchedules = useMemo(() => {
     return [...state.schedules].sort((a, b) => {
@@ -70,10 +78,38 @@ export default function ScheduleWindow({ onNavigate }: Props) {
     return arr.map((v, i) => (forecast[i] || 0) * 0.6 + v * 0.4)
   }, [state.schedules, state.loadForecast])
 
+  const storageBenefit = useMemo(() => {
+    return state.storageSchedules.map((st, idx) => {
+      const chargeCost = Array.from({ length: 24 }, (_, h) => {
+        if (h >= Math.floor(st.chargeStart) && h < Math.ceil(st.chargeEnd)) {
+          return (state.energyPrice.electricity[h] || 0) * 500
+        }
+        return 0
+      }).reduce((a, b) => a + b, 0)
+      const dischargeValue = Array.from({ length: 24 }, (_, h) => {
+        if (h >= Math.floor(st.dischargeStart) && h < Math.ceil(st.dischargeEnd)) {
+          return (state.energyPrice.electricity[h] || 0) * 400
+        }
+        return 0
+      }).reduce((a, b) => a + b, 0)
+      return {
+        idx,
+        chargeKwh: (st.chargeEnd - st.chargeStart) * 500,
+        dischargeKwh: (st.dischargeEnd - st.dischargeStart) * 400,
+        chargeCost: Math.round(chargeCost),
+        dischargeValue: Math.round(dischargeValue),
+        profit: Math.round(dischargeValue - chargeCost),
+      }
+    })
+  }, [state.storageSchedules, state.energyPrice])
+
+  const totalStorageProfit = storageBenefit.reduce((a, b) => a + b.profit, 0)
+
   const compareDiff = useMemo(() => {
-    if (!compareIds) return null
-    const planA = state.savedPlans.find((p) => p.id === compareIds[0])
-    const planB = state.savedPlans.find((p) => p.id === compareIds[1])
+    const ids = localCompareIds
+    if (!ids || !ids[0] || !ids[1]) return null
+    const planA = state.savedPlans.find((p) => p.id === ids[0])
+    const planB = state.savedPlans.find((p) => p.id === ids[1])
     if (!planA || !planB) return null
     const diffItems: { name: string; type: string; field: string; aVal: string; bVal: string }[] = []
     const allIds = new Set([...planA.schedules.map((s) => s.id), ...planB.schedules.map((s) => s.id)])
@@ -94,7 +130,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
     planA.schedules.forEach((s) => { for (let h = Math.max(0, Math.floor(s.startHour)); h < Math.min(24, Math.ceil(s.endHour)); h++) curveA[h] += s.power })
     planB.schedules.forEach((s) => { for (let h = Math.max(0, Math.floor(s.startHour)); h < Math.min(24, Math.ceil(s.endHour)); h++) curveB[h] += s.power })
     return { diffItems, curveA, curveB, planA, planB }
-  }, [compareIds, state.savedPlans])
+  }, [localCompareIds, state.savedPlans])
 
   const chartData = useMemo(() => {
     if (compareDiff) {
@@ -189,6 +225,14 @@ export default function ScheduleWindow({ onNavigate }: Props) {
   }
 
   const activePlan = state.savedPlans.find((p) => p.id === state.activePlanId)
+  const publishedPlan = state.savedPlans.find((p) => p.id === state.publishedPlanId)
+
+  const handlePublish = (planId: string) => {
+    if (!publishPublisher.trim()) return alert('请输入发布人姓名')
+    state.publishPlan(planId, publishPublisher.trim())
+    setShowPublishDialog(false)
+    setPublishPublisher('')
+  }
 
   return (
     <div
@@ -207,11 +251,20 @@ export default function ScheduleWindow({ onNavigate }: Props) {
           <span className="legend-item"><span className="swatch" style={{ background: '#8B5CF6' }} />空压机</span>
         </div>
         <div className="toolbar-spacer" />
+        {publishedPlan && (
+          <span className="tag tag-green" title={`由 ${publishedPlan.publishedBy || '-'} 于 ${publishedPlan.publishedAt ? new Date(publishedPlan.publishedAt).toLocaleString('zh-CN') : '-'}`}>
+            🚀 执行版：{publishedPlan.name}
+          </span>
+        )}
         {activePlan && <span className="tag tag-blue">📋 {activePlan.name}</span>}
         <span className={`tag ${overDemand ? 'tag-red' : 'tag-green'}`}>峰值 {peakLoad.toFixed(0)}kW / 红线 {state.demandRedLine}kW</span>
         <span className="tag tag-blue">本日预估 ¥{totalCost.toFixed(0)}</span>
+        {totalStorageProfit > 0 && <span className="tag tag-green">🔋储能收益 ¥{totalStorageProfit}</span>}
         <button className="btn btn-sm" onClick={() => setShowStoragePanel(!showStoragePanel)}>🔋 储能控制</button>
         <button className="btn btn-sm" onClick={() => setShowPlanPanel(!showPlanPanel)}>📋 方案管理</button>
+        {activePlan && (
+          <button className="btn btn-sm btn-success" onClick={() => { setShowPublishDialog(true); setPublishPublisher('') }}>🚀 发布执行版</button>
+        )}
         <button className="btn btn-sm btn-primary" onClick={() => onNavigate?.('cost')}>成本对比 →</button>
       </div>
 
@@ -247,49 +300,61 @@ export default function ScheduleWindow({ onNavigate }: Props) {
       {showStoragePanel && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">🔋 储能系统调度（两组电池分别控制）</div>
+            <div className="card-title">🔋 储能系统调度（两组电池分别控制，实时联动甘特图/负荷/成本）</div>
             <button className="btn btn-sm" onClick={() => setShowStoragePanel(false)}>收起</button>
           </div>
           <div className="grid grid-2">
-            {state.storageSchedules.map((st, idx) => (
-              <div key={st.id} style={{ padding: 14, background: 'var(--bg-primary)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span style={{ fontWeight: 600 }}>储能组 #{idx + 1}</span>
-                  <span className="tag tag-green">容量 {st.capacity} kWh</span>
-                </div>
-                <div className="form-row"><label>充电时段（谷段）</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} step={0.5} value={st.chargeStart} style={{ width: 80 }}
-                      onChange={(e) => state.updateStorageSchedule({ ...st, chargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
-                    <span>—</span>
-                    <input type="number" min={0} max={24} step={0.5} value={st.chargeEnd} style={{ width: 80 }}
-                      onChange={(e) => state.updateStorageSchedule({ ...st, chargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
+            {state.storageSchedules.map((st, idx) => {
+              const ben = storageBenefit[idx]
+              return (
+                <div key={st.id} style={{ padding: 14, background: 'var(--bg-primary)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <span style={{ fontWeight: 600 }}>储能组 #{idx + 1}</span>
+                      <span className="tag tag-green" style={{ marginLeft: 8 }}>容量 {st.capacity} kWh</span>
+                      {ben && <span className="tag" style={{ marginLeft: 6, background: ben.profit >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: ben.profit >= 0 ? '#10B981' : '#ef4444', border: `1px solid ${ben.profit >= 0 ? '#10B981' : '#ef4444'}44` }}>
+                        💰 收益 ¥{ben.profit}
+                      </span>}
+                    </div>
+                  </div>
+                  <div className="form-row"><label>充电时段（谷段，-500kW）</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input type="number" min={0} max={24} step={0.5} value={st.chargeStart} style={{ width: 80 }}
+                        onChange={(e) => state.updateStorageSchedule({ ...st, chargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
+                      <span>—</span>
+                      <input type="number" min={0} max={24} step={0.5} value={st.chargeEnd} style={{ width: 80 }}
+                        onChange={(e) => state.updateStorageSchedule({ ...st, chargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
+                      <span className="tag tag-green" style={{ marginLeft: 6, fontSize: 10 }}>
+                        充电 {ben?.chargeKwh}kWh / ¥{ben?.chargeCost}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="form-row"><label>放电时段（尖峰，+400kW）</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input type="number" min={0} max={24} step={0.5} value={st.dischargeStart} style={{ width: 80 }}
+                        onChange={(e) => state.updateStorageSchedule({ ...st, dischargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
+                      <span>—</span>
+                      <input type="number" min={0} max={24} step={0.5} value={st.dischargeEnd} style={{ width: 80 }}
+                        onChange={(e) => state.updateStorageSchedule({ ...st, dischargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
+                      <span className="tag tag-yellow" style={{ marginLeft: 6, fontSize: 10 }}>
+                        放电 {ben?.dischargeKwh}kWh / ¥{ben?.dischargeValue}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="stat-row"><span className="stat-label">当前SOC</span><span className="stat-value">{((st.currentLevel / st.capacity) * 100).toFixed(0)}% ({st.currentLevel}kWh)</span></div>
+                  <div className="progress-bar"><div className="progress-fill" style={{ width: `${(st.currentLevel / st.capacity) * 100}%`, background: 'var(--accent-green)' }} /></div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {state.schedules.filter((s) => s.type === 'storage' && s.storageGroupIdx === idx).map((s) => (
+                      <span key={s.id} className="tag" style={{ fontSize: 10, background: s.color + '22', color: s.color, border: `1px solid ${s.color}44` }}>
+                        {s.power < 0 ? '🔋 充' : '⚡ 放'} {s.name}: {fmtH(s.startHour)}–{fmtH(s.endHour)}
+                      </span>
+                    ))}
                   </div>
                 </div>
-                <div className="form-row"><label>放电时段（尖峰）</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} step={0.5} value={st.dischargeStart} style={{ width: 80 }}
-                      onChange={(e) => state.updateStorageSchedule({ ...st, dischargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
-                    <span>—</span>
-                    <input type="number" min={0} max={24} step={0.5} value={st.dischargeEnd} style={{ width: 80 }}
-                      onChange={(e) => state.updateStorageSchedule({ ...st, dischargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
-                  </div>
-                </div>
-                <div className="stat-row"><span className="stat-label">充电量</span><span className="stat-value">{((st.chargeEnd - st.chargeStart) * 500).toFixed(0)} kWh</span></div>
-                <div className="stat-row"><span className="stat-label">放电量</span><span className="stat-value">{((st.dischargeEnd - st.dischargeStart) * 400).toFixed(0)} kWh</span></div>
-                <div className="stat-row"><span className="stat-label">当前SOC</span><span className="stat-value">{((st.currentLevel / st.capacity) * 100).toFixed(0)}% ({st.currentLevel}kWh)</span></div>
-                <div className="progress-bar"><div className="progress-fill" style={{ width: `${(st.currentLevel / st.capacity) * 100}%`, background: 'var(--accent-green)' }} /></div>
-                <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {state.schedules.filter((s) => s.type === 'storage' && s.id.endsWith(String(idx + 1))).map((s) => (
-                    <span key={s.id} className="tag" style={{ fontSize: 10, background: s.color + '22', color: s.color, border: `1px solid ${s.color}44` }}>
-                      {s.name}: {fmtH(s.startHour)}–{fmtH(s.endHour)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -297,14 +362,17 @@ export default function ScheduleWindow({ onNavigate }: Props) {
       {showPlanPanel && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">📋 方案版本管理</div>
+            <div className="card-title">📋 方案版本管理（保存快照、加载对比、发布执行版）</div>
             <button className="btn btn-sm" onClick={() => setShowPlanPanel(false)}>收起</button>
           </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <button className="btn btn-sm btn-primary" onClick={() => { setPlanName(''); setPlanNote(''); setShowSaveDialog(true) }}>💾 另存当前方案</button>
-                <button className="btn btn-sm" onClick={() => setCompareIds(null)} disabled={!compareIds}>退出对比</button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 400 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button className="btn btn-sm btn-primary" onClick={() => { setPlanName(`方案_${state.savedPlans.length + 1}`); setPlanNote(''); setShowSaveDialog(true) }}>💾 另存当前方案</button>
+                <button className="btn btn-sm" onClick={() => { setLocalCompareIds(null); state.setComparePlanIds(null) }} disabled={!localCompareIds}>退出对比</button>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>
+                  {localCompareIds ? `已选对比：[${localCompareIds[0].slice(-5)}] vs [${localCompareIds[1] ? localCompareIds[1].slice(-5) : '？'}]` : '点击任意方案的「对比」开始选择两版对比'}
+                </span>
               </div>
               {state.savedPlans.length === 0 ? (
                 <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
@@ -314,37 +382,48 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {state.savedPlans.map((p) => (
                     <div key={p.id} style={{
-                      padding: '8px 12px', background: state.activePlanId === p.id ? 'rgba(59,130,246,0.15)' : 'var(--bg-primary)',
-                      border: `1px solid ${state.activePlanId === p.id ? 'var(--accent-blue)' : 'var(--border)'}`,
-                      borderRadius: 8, minWidth: 140, cursor: 'pointer',
+                      padding: '10px 12px',
+                      background: state.activePlanId === p.id ? 'rgba(59,130,246,0.15)' : 'var(--bg-primary)',
+                      border: `1px solid ${state.publishedPlanId === p.id ? 'var(--accent-green)' : state.activePlanId === p.id ? 'var(--accent-blue)' : 'var(--border)'}`,
+                      borderRadius: 8, minWidth: 180, cursor: 'pointer',
                     }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{p.name}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
+                        {state.publishedPlanId === p.id && <span className="tag tag-green" style={{ fontSize: 9 }}>🚀 执行版</span>}
+                      </div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
                         {new Date(p.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         {p.note && ` · ${p.note.slice(0, 15)}`}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 6 }}>
                         费用 ¥{p.costSnapshot.totalCost.toLocaleString()} · 峰值 {p.costSnapshot.peakDemand}kW
                       </div>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                      {p.publishedAt > 0 && (
+                        <div style={{ fontSize: 9, color: 'var(--accent-green)', marginBottom: 6 }}>
+                          发布：{p.publishedBy} · {new Date(p.publishedAt).toLocaleDateString('zh-CN')}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button className="btn btn-sm" style={{ fontSize: 10, padding: '2px 6px' }}
                           onClick={() => state.loadPlan(p.id)}>加载</button>
                         <button className="btn btn-sm" style={{ fontSize: 10, padding: '2px 6px' }}
                           onClick={() => {
-                            if (compareIds) {
-                              setCompareIds([compareIds[0], p.id])
-                            } else {
-                              setCompareIds([p.id, ''])
-                            }
-                          }}>对比</button>
+                            const next: [string, string] = localCompareIds
+                              ? (localCompareIds[0] ? (localCompareIds[1] ? [p.id, ''] : [localCompareIds[0], p.id]) : [p.id, ''])
+                              : [p.id, '']
+                            setLocalCompareIds(next)
+                            if (next[0] && next[1]) state.setComparePlanIds(next)
+                          }}>{localCompareIds && !localCompareIds[1] && localCompareIds[0] !== p.id ? '作为对比' : '对比'}</button>
+                        <button className="btn btn-sm btn-success" style={{ fontSize: 10, padding: '2px 6px' }}
+                          onClick={() => { state.loadPlan(p.id); setShowPublishDialog(true); setPublishPublisher('') }}>🚀发布</button>
                         <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: '2px 6px' }}
-                          onClick={() => { state.deletePlan(p.id); if (compareIds && compareIds[0] === p.id) setCompareIds(null) }}>删除</button>
+                          onClick={() => { state.deletePlan(p.id); if (localCompareIds && (localCompareIds[0] === p.id || localCompareIds[1] === p.id)) { setLocalCompareIds(null); state.setComparePlanIds(null) } }}>删除</button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              {compareIds && compareIds[1] && compareDiff && (
+              {localCompareIds && localCompareIds[0] && localCompareIds[1] && compareDiff && (
                 <div style={{ marginTop: 12, padding: 12, background: 'var(--bg-primary)', borderRadius: 8, border: '1px solid var(--accent-orange)' }}>
                   <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--accent-orange)' }}>
                     🔄 方案对比：{compareDiff.planA.name} ↔ {compareDiff.planB.name}
@@ -377,8 +456,8 @@ export default function ScheduleWindow({ onNavigate }: Props) {
       <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
         <div className="card-header" style={{ padding: '10px 14px' }}>
           <div>
-            <div className="card-title">甘特图拖拽区（按住左键拖动任务块）</div>
-            <div className="card-subtitle">红色虚线为需量红线，青线为当前时间{compareIds ? ' · 对比模式下橙色条为差异项' : ''}</div>
+            <div className="card-title">甘特图拖拽区（按住左键拖动任务块，储能充放电可单独拖动）</div>
+            <div className="card-subtitle">红色虚线为需量红线，青线为当前时间{localCompareIds ? ' · 对比模式下橙色条为差异项' : ''}</div>
           </div>
           {selectedItem && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -465,7 +544,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                         >
                           <span style={{ fontSize: 11, fontWeight: 500 }}>
                             {fmtH(item.startHour)}–{fmtH(item.endHour)}
-                            {item.type === 'storage' ? (item.power < 0 ? ' 充' : ' 放') : ''}
+                            {item.type === 'storage' ? (item.power < 0 ? ' 🔋充' : ' ⚡放') : ''}
                             {isDiff ? ' ⚡' : ''}
                           </span>
                         </div>
@@ -481,7 +560,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
 
       <div className="card" style={{ flexShrink: 0 }}>
         <div className="card-header">
-          <div className="card-title">📈 排程后负荷曲线预览{compareDiff ? '（对比模式）' : ''}</div>
+          <div className="card-title">📈 排程后负荷曲线预览{localCompareIds ? '（对比模式）' : ''}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-sm" onClick={() => onNavigate?.('alerts')}>⚠️ 查看告警</button>
             <button className="btn btn-sm btn-success" onClick={() => { setPlanName(`方案_${state.savedPlans.length + 1}`); setPlanNote(''); setShowSaveDialog(true) }}>💾 保存排程方案</button>
@@ -520,6 +599,39 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                 setShowSaveDialog(false)
                 setShowPlanPanel(true)
               }}>保存方案</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPublishDialog && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            width: 420, background: 'var(--bg-card)', border: '1px solid var(--accent-green)',
+            borderRadius: 12, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          }}>
+            <div className="card-header" style={{ marginTop: -4 }}>
+              <div className="card-title" style={{ color: 'var(--accent-green)' }}>🚀 发布为今日执行方案</div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8, padding: '8px 10px', background: 'rgba(16,185,129,0.1)', borderRadius: 6 }}>
+              发布后，总览窗、告警窗、成本窗和复盘窗将默认使用此方案数据。所有窗口将同步更新。
+            </div>
+            <div className="form-row" style={{ marginTop: 14 }}>
+              <label>发布人姓名 *</label>
+              <input value={publishPublisher} onChange={(e) => setPublishPublisher(e.target.value)} placeholder="如：张主管" />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+              当前方案：{activePlan ? activePlan.name : publishedPlan ? publishedPlan.name : '（将使用当前已加载方案）'}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <button className="btn" onClick={() => setShowPublishDialog(false)}>取消</button>
+              <button className="btn btn-success" disabled={!publishPublisher.trim()}
+                onClick={() => handlePublish(activePlan?.id || publishedPlan?.id || state.savedPlans[0].id)}>
+                确认发布执行
+              </button>
             </div>
           </div>
         </div>

@@ -13,6 +13,7 @@ export default function OverviewWindow({ onNavigate }: Props) {
   const nowLoad = state.loadForecast[currentHour]?.electricity ?? 0
   const loadPercent = Math.min(100, (state.todayTotalLoad / (state.demandRedLine * 24)) * 100)
   const nowPercent = Math.min(100, (nowLoad / state.demandRedLine) * 100)
+  const publishedPlan = state.savedPlans.find((p) => p.id === state.publishedPlanId)
 
   const loadChartData = useMemo(() => {
     const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`)
@@ -76,7 +77,19 @@ export default function OverviewWindow({ onNavigate }: Props) {
   }
 
   return (
-    <div className="grid grid-2" style={{ gridTemplateRows: 'auto 1fr', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+      <div className="toolbar">
+        <span className="toolbar-title">🎯 总览仪表盘</span>
+        <div className="toolbar-spacer" />
+        {publishedPlan && (
+          <span className="tag tag-green" title={`由 ${publishedPlan.publishedBy} 发布`}>
+            🚀 执行方案：{publishedPlan.name}
+          </span>
+        )}
+        <span className="tag tag-yellow">峰时电价 ¥{Math.max(...state.energyPrice.electricity).toFixed(2)}/kWh</span>
+        <span className="tag tag-green">谷时电价 ¥{Math.min(...state.energyPrice.electricity).toFixed(2)}/kWh</span>
+        <button className="btn btn-sm btn-primary" onClick={() => onNavigate?.('schedule')}>排程调整 →</button>
+      </div>
       <div className="grid grid-4">
         <div className="metric-card" style={{ borderColor: nowPercent > 90 ? 'var(--accent-red)' : 'var(--accent-blue)' }}>
           <div className="metric-label">⚡ 当前用电负荷</div>

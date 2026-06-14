@@ -74,6 +74,7 @@ export interface ScheduleItem {
   power: number
   resource: EnergyType
   color: string
+  storageGroupIdx?: number
 }
 
 export interface StorageSchedule {
@@ -113,6 +114,7 @@ export interface CostPlan {
 export interface ReviewRecord {
   id: string
   date: string
+  relatedPlanId: string | null
   plannedLoad: number
   actualLoad: number
   deviation: number
@@ -145,6 +147,12 @@ export interface SchedulePlan {
   storageSchedules: StorageSchedule[]
   costSnapshot: CostPlan
   createdAt: number
+  publishedAt: number
+  publishedBy: string
+}
+
+export interface UiState {
+  comparePlanIds: [string, string] | null
 }
 
 export interface AppState {
@@ -162,6 +170,8 @@ export interface AppState {
   reviewRecords: ReviewRecord[]
   savedPlans: SchedulePlan[]
   activePlanId: string | null
+  publishedPlanId: string | null
+  uiState: UiState
   currentDate: string
   demandRedLine: number
   todayTotalLoad: number
