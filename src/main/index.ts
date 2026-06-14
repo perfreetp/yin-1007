@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'node:path'
+import Store from 'electron-store'
 
 process.env.DIST_ELECTRON = path.join(__dirname, '..')
 process.env.DIST = path.join(process.env.DIST_ELECTRON, '../dist')
@@ -30,6 +31,30 @@ const windows: Record<WindowKey, BrowserWindow | null> = {
   alerts: null,
   cost: null,
   review: null,
+}
+
+const persistentStore = new Store({
+  name: 'energy-scheduling-data',
+  fileExtension: 'json',
+  clearInvalidConfig: true,
+})
+
+const STORE_KEY = 'appStateV1'
+
+function loadPersistedState(): unknown {
+  try {
+    return persistentStore.get(STORE_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+
+function savePersistedState(state: unknown) {
+  try {
+    persistentStore.set(STORE_KEY, state)
+  } catch (e) {
+    console.error('Failed to persist state:', e)
+  }
 }
 
 function getWindowConfigs(): WindowConfig[] {
@@ -98,10 +123,10 @@ function focusWindow(key: WindowKey) {
   }
 }
 
-function broadcastData(channel: string, data: unknown, excludeKey?: WindowKey) {
+function broadcastData(channel: string, data: unknown, excludeWebContentsId?: number) {
   Object.keys(windows).forEach((key) => {
     const win = windows[key as WindowKey]
-    if (win && key !== excludeKey) {
+    if (win && win.webContents.id !== excludeWebContentsId) {
       win.webContents.send(channel, data)
     }
   })
@@ -118,11 +143,22 @@ app.whenReady().then(() => {
     return getWindowConfigs().map((c) => ({ key: c.key, title: c.title }))
   })
 
+  ipcMain.handle('store:load', () => {
+    return loadPersistedState()
+  })
+
+  ipcMain.on('store:update', (e, payload: { partial: unknown; full: unknown }) => {
+    savePersistedState(payload.full)
+    broadcastData('store:sync', payload.partial, e.sender.id)
+  })
+
+  ipcMain.on('store:reset', () => {
+    persistentStore.delete(STORE_KEY)
+    broadcastData('store:reset', null)
+  })
+
   ipcMain.on('data:update', (e, payload: { channel: string; data: unknown }) => {
-    const senderKey = Object.keys(windows).find(
-      (k) => windows[k as WindowKey]?.webContents.id === e.sender.id,
-    ) as WindowKey | undefined
-    broadcastData(payload.channel, payload.data, senderKey)
+    broadcastData(payload.channel, payload.data, e.sender.id)
   })
 
   app.on('activate', () => {

@@ -115,7 +115,6 @@ export default function ScheduleWindow({ onNavigate }: Props) {
   const totalCost = netCurve.reduce((a, b, i) => a + b * state.energyPrice.electricity[i], 0)
 
   const onMouseDown = (e: React.MouseEvent, item: ScheduleItem) => {
-    if (item.type === 'boiler') return
     e.preventDefault()
     setDragging({ id: item.id, startX: e.clientX, origStart: item.startHour })
     setSelectedId(item.id)
@@ -216,17 +215,21 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                 </div>
                 <div className="form-row"><label>谷段充电</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} value={st.chargeStart} style={{ width: 80 }} />
+                    <input type="number" min={0} max={24} value={st.chargeStart} style={{ width: 80 }}
+                      onChange={(e) => state.updateStorageSchedule({ ...st, chargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span>—</span>
-                    <input type="number" min={0} max={24} value={st.chargeEnd} style={{ width: 80 }} />
+                    <input type="number" min={0} max={24} value={st.chargeEnd} style={{ width: 80 }}
+                      onChange={(e) => state.updateStorageSchedule({ ...st, chargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
                   </div>
                 </div>
                 <div className="form-row"><label>尖峰放电</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} value={st.dischargeStart} style={{ width: 80 }} />
+                    <input type="number" min={0} max={24} value={st.dischargeStart} style={{ width: 80 }}
+                      onChange={(e) => state.updateStorageSchedule({ ...st, dischargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span>—</span>
-                    <input type="number" min={0} max={24} value={st.dischargeEnd} style={{ width: 80 }} />
+                    <input type="number" min={0} max={24} value={st.dischargeEnd} style={{ width: 80 }}
+                      onChange={(e) => state.updateStorageSchedule({ ...st, dischargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
                   </div>
                 </div>

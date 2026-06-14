@@ -109,9 +109,9 @@ export function createInitialState(): AppState {
       { id: 'cp3', name: '极致节能方案', totalCost: 52380, electricityCost: 29500, steamCost: 16200, airCost: 6680, carbonEmission: 11.5, riskLevel: 'high', peakDemand: 2350, description: '最大程度错峰，部分订单延迟至夜班' },
     ],
     reviewRecords: [
-      { id: 'r1', date: '2026-06-13', plannedLoad: 20800, actualLoad: 21560, deviation: 760, deviationRate: 3.65, plannedCost: 65800, actualCost: 68520, reason: '午间气温偏高，空调负荷增加；订单C焊接工作量超出预期', notes: '建议增加环境温度对负荷预测的权重系数', approval: 'approved', approver: '张主管', createdAt: Date.now() - 86400000 },
-      { id: 'r2', date: '2026-06-12', plannedLoad: 19500, actualLoad: 18920, deviation: -580, deviationRate: -2.97, plannedCost: 61200, actualCost: 59800, reason: 'CNC#2下午因换刀停机1.5小时，涂装线维护提前完成', notes: '换刀计划需纳入排程模型', approval: 'approved', approver: '张主管', createdAt: Date.now() - 172800000 },
-      { id: 'r3', date: '2026-06-11', plannedLoad: 22300, actualLoad: 23150, deviation: 850, deviationRate: 3.81, plannedCost: 69500, actualCost: 72100, reason: '注塑机#2临时启用处理紧急订单，锅炉超负荷运行', notes: '紧急订单需预留备用容量', approval: 'pending', approver: '', createdAt: Date.now() - 259200000 },
+      { id: 'r1', date: '2026-06-13', plannedLoad: 20800, actualLoad: 21560, deviation: 760, deviationRate: 3.65, plannedCost: 65800, actualCost: 68520, reason: '午间气温偏高，空调负荷增加；订单C焊接工作量超出预期', notes: '建议增加环境温度对负荷预测的权重系数', approval: 'approved', approver: '张主管', approvalRemark: '偏差原因分析清楚，改进建议合理，同意通过。后续重点优化温度系数。', approvalAt: Date.now() - 82800000, createdAt: Date.now() - 86400000 },
+      { id: 'r2', date: '2026-06-12', plannedLoad: 19500, actualLoad: 18920, deviation: -580, deviationRate: -2.97, plannedCost: 61200, actualCost: 59800, reason: 'CNC#2下午因换刀停机1.5小时，涂装线维护提前完成', notes: '换刀计划需纳入排程模型', approval: 'approved', approver: '张主管', approvalRemark: '整体控制良好，节约费用值得肯定。换刀计划已排产系统需求同步。', approvalAt: Date.now() - 169200000, createdAt: Date.now() - 172800000 },
+      { id: 'r3', date: '2026-06-11', plannedLoad: 22300, actualLoad: 23150, deviation: 850, deviationRate: 3.81, plannedCost: 69500, actualCost: 72100, reason: '注塑机#2临时启用处理紧急订单，锅炉超负荷运行', notes: '紧急订单需预留备用容量', approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now() - 259200000 },
     ],
   }
 }

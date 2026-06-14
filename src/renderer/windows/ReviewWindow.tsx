@@ -123,6 +123,8 @@ export default function ReviewWindow({ onNavigate }: Props) {
     },
   }
 
+  const [approvalRemark, setApprovalRemark] = useState('')
+
   const stats = useMemo(() => {
     const n = state.reviewRecords.length
     if (n === 0) return { avgDev: 0, avgCost: 0, overCount: 0, approved: 0 }
@@ -134,11 +136,20 @@ export default function ReviewWindow({ onNavigate }: Props) {
     }
   }, [state.reviewRecords])
 
+  const fmtTime = (ts: number) => ts ? new Date(ts).toLocaleString('zh-CN') : '-'
+
   const exportReport = () => {
-    const headers = ['日期', '计划负荷(kWh)', '实际负荷(kWh)', '偏差(kWh)', '偏差率(%)', '计划费用(¥)', '实际费用(¥)', '偏差原因', '备注', '审批状态', '审批人']
+    const headers = [
+      '日期', '计划负荷(kWh)', '实际负荷(kWh)', '偏差(kWh)', '偏差率(%)',
+      '计划费用(¥)', '实际费用(¥)', '费用差异(¥)', '偏差原因', '改进备注',
+      '审批状态', '审批人', '审批意见', '审批时间', '创建时间',
+    ]
     const rows = state.reviewRecords.map((r) => [
-      r.date, r.plannedLoad, r.actualLoad, r.deviation, r.deviationRate.toFixed(2),
-      r.plannedCost, r.actualCost, r.reason, r.notes, APPROVAL_LABELS[r.approval].text, r.approver || '-',
+      r.date, r.plannedLoad, r.actualLoad, r.deviation, r.deviationRate.toFixed(2) + '%',
+      r.plannedCost, r.actualCost, r.actualCost - r.plannedCost,
+      r.reason, r.notes,
+      APPROVAL_LABELS[r.approval].text, r.approver || '-', r.approvalRemark || '-',
+      fmtTime(r.approvalAt), fmtTime(r.createdAt),
     ])
     const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
@@ -241,6 +252,8 @@ export default function ReviewWindow({ onNavigate }: Props) {
                       setSelectedId(r.id)
                       setEditReason(r.reason)
                       setEditNotes(r.notes)
+                      setApprovalRemark(r.approvalRemark || '')
+                      setApprover(r.approver || '')
                     }}
                     style={{
                       cursor: 'pointer',
@@ -325,26 +338,55 @@ export default function ReviewWindow({ onNavigate }: Props) {
                 />
               </div>
 
+              {selected.approval !== 'pending' && (
+                <div style={{ padding: 12, background: 'var(--bg-primary)', borderRadius: 6, border: `1px solid ${selected.approval === 'approved' ? 'var(--accent-green)' : 'var(--accent-red)'}`, marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span className={`tag ${APPROVAL_LABELS[selected.approval].cls}`} style={{ fontSize: 13 }}>
+                      {selected.approval === 'approved' ? '✓ 已审批通过' : '❌ 已驳回'}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      审批时间：{fmtTime(selected.approvalAt)}
+                    </span>
+                  </div>
+                  <div className="stat-row"><span className="stat-label">审批人</span><span className="stat-value">{selected.approver || '-'}</span></div>
+                  <div className="stat-row">
+                    <span className="stat-label">审批意见</span>
+                    <span className="stat-value" style={{ textAlign: 'right', maxWidth: '60%' }}>
+                      {selected.approvalRemark || '（无审批意见）'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {selected.approval === 'pending' && (
                 <div style={{ padding: 12, background: 'var(--bg-primary)', borderRadius: 6, border: '1px solid var(--accent-yellow)', borderStyle: 'dashed', marginBottom: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--accent-yellow)' }}>⚖️ 主管审批</div>
                   <div className="form-row">
-                    <label>审批人姓名</label>
+                    <label>审批人姓名 *</label>
                     <input placeholder="如：张主管" value={approver} onChange={(e) => setApprover(e.target.value)} />
+                  </div>
+                  <div className="form-row">
+                    <label>审批意见</label>
+                    <textarea
+                      value={approvalRemark}
+                      onChange={(e) => setApprovalRemark(e.target.value)}
+                      placeholder="填写审批意见和说明..."
+                      style={{ minHeight: 60 }}
+                    />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
                     <button className="btn btn-sm btn-danger" onClick={() => {
                       if (!approver) return alert('请输入审批人姓名')
                       state.updateReviewRecord({
                         ...selected, reason: editReason, notes: editNotes,
-                        approval: 'rejected', approver, createdAt: Date.now(),
+                        approval: 'rejected', approver, approvalRemark, approvalAt: Date.now(), createdAt: selected.createdAt,
                       })
                     }}>❌ 驳回</button>
                     <button className="btn btn-sm btn-success" onClick={() => {
                       if (!approver) return alert('请输入审批人姓名')
                       state.updateReviewRecord({
                         ...selected, reason: editReason, notes: editNotes,
-                        approval: 'approved', approver, createdAt: Date.now(),
+                        approval: 'approved', approver, approvalRemark, approvalAt: Date.now(), createdAt: selected.createdAt,
                       })
                     }}>✓ 审批通过</button>
                   </div>
@@ -354,7 +396,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn btn-sm" onClick={() => onNavigate?.('schedule')}>📅 参考排程</button>
                 <button className="btn btn-sm btn-primary" onClick={() => {
-                  state.updateReviewRecord({ ...selected, reason: editReason, notes: editNotes })
+                  state.updateReviewRecord({ ...selected, reason: editReason, notes: editNotes, approvalRemark, approver })
                   alert('✓ 已保存修改')
                 }}>💾 保存修改</button>
               </div>
@@ -420,12 +462,14 @@ export default function ReviewWindow({ onNavigate }: Props) {
                   plannedLoad: pl, actualLoad: al,
                   deviation: al - pl, deviationRate: ((al - pl) / pl) * 100,
                   plannedCost: pc, actualCost: ac,
-                  reason, notes, approval: 'pending', approver: '', createdAt: Date.now(),
+                  reason, notes, approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now(),
                 }
                 state.addReviewRecord(rec)
                 setSelectedId(rec.id)
                 setEditReason(reason)
                 setEditNotes(notes)
+                setApprovalRemark('')
+                setApprover('')
                 setShowAdd(false)
               }}>提交复盘</button>
             </div>

@@ -15,6 +15,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
+import { setupStoreSync } from './store/useEnergyStore'
 
 ChartJS.register(
   CategoryScale,
@@ -37,9 +38,16 @@ declare global {
       sendData: (channel: string, data: unknown) => void
       onData: (channel: string, callback: (data: unknown) => void) => () => void
       getCurrentWindow: () => string | null
+      loadStore: () => Promise<unknown>
+      sendStoreUpdate: (partial: unknown, full: unknown) => void
+      onStoreSync: (callback: (partial: unknown) => void) => () => void
+      onStoreReset: (callback: () => void) => () => void
+      resetStore: () => void
     }
   }
 }
+
+setupStoreSync()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

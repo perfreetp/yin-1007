@@ -123,6 +123,8 @@ export interface ReviewRecord {
   notes: string
   approval: 'pending' | 'approved' | 'rejected'
   approver: string
+  approvalRemark: string
+  approvalAt: number
   createdAt: number
 }
 

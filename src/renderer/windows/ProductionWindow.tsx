@@ -69,7 +69,7 @@ export default function ProductionWindow({ onNavigate }: Props) {
       airConsumption: newEq.airConsumption!,
       status: newEq.status as Equipment['status'],
     }
-    state.equipments.push(eq)
+    state.addEquipment(eq)
     setNewEq({ name: '', workshopId: '', power: 0, steamConsumption: 0, airConsumption: 0, status: 'standby' })
     setShowEqForm(false)
   }
