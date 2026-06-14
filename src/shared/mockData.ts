@@ -44,7 +44,6 @@ export function createInitialState(): AppState {
     todayTotalLoad: 2156,
     publishedPlanId: demoPlanId,
     activePlanId: null,
-    uiState: { comparePlanIds: null },
     energyPrice: {
       electricity: [
         0.35, 0.35, 0.35, 0.35, 0.35, 0.35,
@@ -143,5 +142,12 @@ export function createInitialState(): AppState {
       { id: 'r3', date: '2026-06-11', relatedPlanId: null, plannedLoad: 22300, actualLoad: 23150, deviation: 850, deviationRate: 3.81, plannedCost: 69500, actualCost: 72100, reason: '注塑机#2临时启用处理紧急订单，锅炉超负荷运行', notes: '紧急订单需预留备用容量', approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now() - 259200000, history: [] },
     ],
     savedPlans: [demoPlan],
+    publishHistory: [{
+      id: 'ph_1', planId: demoPlanId, planName: demoPlan.name,
+      publishedAt: demoPlan.publishedAt, publishedBy: demoPlan.publishedBy,
+      schedules: JSON.parse(JSON.stringify(demoPlan.schedules)),
+      storageSchedules: JSON.parse(JSON.stringify(demoPlan.storageSchedules)),
+    }],
+    uiState: { comparePlanIds: null, lastReviewId: 'r1', lastPlanFilter: demoPlanId, lastWindowKey: 'overview' },
   }
 }

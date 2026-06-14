@@ -15,13 +15,17 @@ const APPROVAL_LABELS: Record<ReviewRecord['approval'], { text: string; cls: str
 
 export default function ReviewWindow({ onNavigate }: Props) {
   const state = useEnergyStore()
-  const [selectedId, setSelectedId] = useState<string>(state.reviewRecords[0]?.id || '')
+  const [planFilter, setPlanFilter] = useState<string>(state.uiState.lastPlanFilter || state.publishedPlanId || state.activePlanId || 'all')
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    if (state.uiState.lastReviewId) return state.uiState.lastReviewId
+    const recordsForFilter = planFilter === 'all' ? state.reviewRecords : state.reviewRecords.filter((r) => r.relatedPlanId === planFilter)
+    return recordsForFilter[0]?.id || ''
+  })
   const [showAdd, setShowAdd] = useState(false)
   const [editReason, setEditReason] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [approver, setApprover] = useState('')
   const [approvalRemark, setApprovalRemark] = useState('')
-  const [planFilter, setPlanFilter] = useState<string>(state.publishedPlanId || state.activePlanId || 'all')
 
   const selected = state.reviewRecords.find((r) => r.id === selectedId)
 
@@ -32,9 +36,10 @@ export default function ReviewWindow({ onNavigate }: Props) {
 
   const newRecord: Partial<ReviewRecord> = {
     date: state.currentDate,
-    plannedLoad: 20800,
+    relatedPlanId: planFilter === 'all' ? null : planFilter,
+    plannedLoad: planFilter !== 'all' ? (state.savedPlans.find((p) => p.id === planFilter)?.costSnapshot.peakDemand || 0) * 8 : 20800,
     actualLoad: 0,
-    plannedCost: 65000,
+    plannedCost: planFilter !== 'all' ? (state.savedPlans.find((p) => p.id === planFilter)?.costSnapshot.totalCost || 0) : 65000,
     actualCost: 0,
     reason: '',
     notes: '',
@@ -224,7 +229,23 @@ export default function ReviewWindow({ onNavigate }: Props) {
       <div className="toolbar">
         <span className="toolbar-title">📋 历史复盘记录</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}>
+          <select
+            value={planFilter}
+            onChange={(e) => {
+              const v = e.target.value
+              setPlanFilter(v)
+              state.setUiState({ lastPlanFilter: v })
+              const recordsForFilter = v === 'all' ? state.reviewRecords : state.reviewRecords.filter((r) => r.relatedPlanId === v)
+              if (recordsForFilter.length > 0) {
+                setSelectedId(recordsForFilter[0].id)
+                state.setUiState({ lastReviewId: recordsForFilter[0].id })
+              } else {
+                setSelectedId('')
+                state.setUiState({ lastReviewId: '' })
+              }
+            }}
+            style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}
+          >
             <option value="all">全部复盘</option>
             {state.savedPlans.map((p) => (
               <option key={p.id} value={p.id}>
@@ -263,6 +284,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
                     key={r.id}
                     onClick={() => {
                       setSelectedId(r.id)
+                      state.setUiState({ lastReviewId: r.id })
                       setEditReason(r.reason)
                       setEditNotes(r.notes)
                       setApprovalRemark(r.approvalRemark || '')
@@ -289,6 +311,31 @@ export default function ReviewWindow({ onNavigate }: Props) {
               </tbody>
             </table>
           </div>
+          {filteredRecords.length === 0 && planFilter !== 'all' && (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 24, marginBottom: 12 }}>📂</div>
+              <div style={{ fontSize: 13, marginBottom: 8 }}>该方案版本暂无复盘记录</div>
+              <button className="btn btn-sm btn-primary" onClick={() => {
+                const p = state.savedPlans.find((x) => x.id === planFilter)
+                if (p && (p as any).schedules) {
+                  const peak = p.costSnapshot.peakDemand
+                  const cost = p.costSnapshot.totalCost
+                  const rec: ReviewRecord = {
+                    id: `r_${Date.now()}`, date: state.currentDate,
+                    relatedPlanId: planFilter,
+                    plannedLoad: peak * 8, actualLoad: peak * 8,
+                    deviation: 0, deviationRate: 0,
+                    plannedCost: cost, actualCost: cost,
+                    reason: '', notes: '', approval: 'pending', approver: '', approvalRemark: '',
+                    approvalAt: 0, createdAt: Date.now(),
+                    history: [{ timestamp: Date.now(), field: '创建记录', oldValue: '', newValue: `基于方案「${p.name}」新建`, operator: '操作员' }],
+                  }
+                  state.addReviewRecord(rec)
+                  setSelectedId(rec.id)
+                }
+              }}>+ 基于此方案新建复盘</button>
+            </div>
+          )}
         </div>
 
         <div className="card" style={{ gridColumn: 'span 3', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

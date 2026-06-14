@@ -14,6 +14,15 @@ export default function OverviewWindow({ onNavigate }: Props) {
   const loadPercent = Math.min(100, (state.todayTotalLoad / (state.demandRedLine * 24)) * 100)
   const nowPercent = Math.min(100, (nowLoad / state.demandRedLine) * 100)
   const publishedPlan = state.savedPlans.find((p) => p.id === state.publishedPlanId)
+  const lastPublishEntry = state.publishHistory.length >= 2 ? state.publishHistory[state.publishHistory.length - 2] : null
+  const currentPublishEntry = state.publishHistory[state.publishHistory.length - 1] || null
+  const showRollback = lastPublishEntry && lastPublishEntry.id !== currentPublishEntry?.id
+
+  const doRollback = () => {
+    if (!lastPublishEntry) return
+    if (!confirm(`确定回滚到上一版方案「${lastPublishEntry.planName}」？`)) return
+    state.rollbackPlan(lastPublishEntry.id)
+  }
 
   const loadChartData = useMemo(() => {
     const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`)
@@ -81,10 +90,18 @@ export default function OverviewWindow({ onNavigate }: Props) {
       <div className="toolbar">
         <span className="toolbar-title">🎯 总览仪表盘</span>
         <div className="toolbar-spacer" />
-        {publishedPlan && (
-          <span className="tag tag-green" title={`由 ${publishedPlan.publishedBy} 发布`}>
-            🚀 执行方案：{publishedPlan.name}
+        {currentPublishEntry && publishedPlan && (
+          <span className="tag tag-green" title={`由 ${currentPublishEntry.publishedBy} 于 ${new Date(currentPublishEntry.publishedAt).toLocaleString('zh-CN')} 发布`}>
+            🚀 执行：{publishedPlan.name} · {new Date(currentPublishEntry.publishedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
           </span>
+        )}
+        {lastPublishEntry && (
+          <span className="tag tag-blue" title={`由 ${lastPublishEntry.publishedBy} 发布于 ${new Date(lastPublishEntry.publishedAt).toLocaleString('zh-CN')}`}>
+            ⬅️ 上一版：{lastPublishEntry.planName}
+          </span>
+        )}
+        {showRollback && (
+          <button className="btn btn-sm btn-secondary" onClick={doRollback}>↩️ 回滚上一版</button>
         )}
         <span className="tag tag-yellow">峰时电价 ¥{Math.max(...state.energyPrice.electricity).toFixed(2)}/kWh</span>
         <span className="tag tag-green">谷时电价 ¥{Math.min(...state.energyPrice.electricity).toFixed(2)}/kWh</span>

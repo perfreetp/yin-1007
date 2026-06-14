@@ -92,6 +92,13 @@ export default function ScheduleWindow({ onNavigate }: Props) {
         }
         return 0
       }).reduce((a, b) => a + b, 0)
+      const socCurve = new Array(25).fill(20)
+      for (let h = 0; h < 24; h++) {
+        let delta = 0
+        if (h >= Math.floor(st.chargeStart) && h < Math.ceil(st.chargeEnd)) delta += 500 / st.capacity * 100
+        if (h >= Math.floor(st.dischargeStart) && h < Math.ceil(st.dischargeEnd)) delta -= 400 / st.capacity * 100
+        socCurve[h + 1] = Math.max(5, Math.min(95, socCurve[h] + delta))
+      }
       return {
         idx,
         chargeKwh: (st.chargeEnd - st.chargeStart) * 500,
@@ -99,6 +106,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
         chargeCost: Math.round(chargeCost),
         dischargeValue: Math.round(dischargeValue),
         profit: Math.round(dischargeValue - chargeCost),
+        socCurve,
       }
     })
   }, [state.storageSchedules, state.energyPrice])
@@ -345,6 +353,27 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                   </div>
                   <div className="stat-row"><span className="stat-label">当前SOC</span><span className="stat-value">{((st.currentLevel / st.capacity) * 100).toFixed(0)}% ({st.currentLevel}kWh)</span></div>
                   <div className="progress-bar"><div className="progress-fill" style={{ width: `${(st.currentLevel / st.capacity) * 100}%`, background: 'var(--accent-green)' }} /></div>
+                  {ben && (
+                    <div style={{ marginTop: 10, height: 70, background: 'var(--bg-primary)', borderRadius: 6, padding: '8px 8px 4px', border: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+                        <span>📊 SOC 变化预览</span>
+                        <span style={{ color: '#10B981' }}>最高 {Math.max(...ben.socCurve).toFixed(0)}%</span>
+                        <span style={{ color: '#F59E0B' }}>最低 {Math.min(...ben.socCurve).toFixed(0)}%</span>
+                      </div>
+                      <svg viewBox="0 0 480 50" preserveAspectRatio="none" style={{ width: '100%', height: 40 }}>
+                        {[20, 50, 80].map((p) => (
+                          <line key={p} x1="0" x2="480" y1={50 - p / 100 * 40} y2={50 - p / 100 * 40} stroke="#334155" strokeWidth="0.5" strokeDasharray="2 2" />
+                        ))}
+                        {ben.socCurve.map((soc, h) => h < 24 && (
+                          <line key={h}
+                            x1={h * 20} y1={50 - soc / 100 * 40}
+                            x2={(h + 1) * 20} y2={50 - ben.socCurve[h + 1] / 100 * 40}
+                            stroke={ben.socCurve[h + 1] > soc ? '#10B981' : '#F59E0B'}
+                            strokeWidth="1.5" />
+                        ))}
+                      </svg>
+                    </div>
+                  )}
                   <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {state.schedules.filter((s) => s.type === 'storage' && s.storageGroupIdx === idx).map((s) => (
                       <span key={s.id} className="tag" style={{ fontSize: 10, background: s.color + '22', color: s.color, border: `1px solid ${s.color}44` }}>

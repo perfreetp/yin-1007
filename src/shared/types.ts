@@ -153,6 +153,19 @@ export interface SchedulePlan {
 
 export interface UiState {
   comparePlanIds: [string, string] | null
+  lastReviewId: string | null
+  lastPlanFilter: string
+  lastWindowKey: WindowKey | null
+}
+
+export interface PublishHistoryEntry {
+  id: string
+  planId: string
+  planName: string
+  publishedAt: number
+  publishedBy: string
+  schedules: ScheduleItem[]
+  storageSchedules: StorageSchedule[]
 }
 
 export interface AppState {
@@ -169,6 +182,7 @@ export interface AppState {
   costPlans: CostPlan[]
   reviewRecords: ReviewRecord[]
   savedPlans: SchedulePlan[]
+  publishHistory: PublishHistoryEntry[]
   activePlanId: string | null
   publishedPlanId: string | null
   uiState: UiState
