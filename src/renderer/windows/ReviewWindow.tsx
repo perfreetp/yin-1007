@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Chart } from 'react-chartjs-2'
 import { useEnergyStore } from '../store/useEnergyStore'
-import type { ReviewRecord, WindowKey } from '@shared/types'
+import type { ReviewRecord, ReviewHistoryEntry, WindowKey } from '@shared/types'
 
 interface Props {
   onNavigate?: (key: WindowKey) => void
@@ -20,8 +20,19 @@ export default function ReviewWindow({ onNavigate }: Props) {
   const [editReason, setEditReason] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [approver, setApprover] = useState('')
+  const [approvalRemark, setApprovalRemark] = useState('')
+  const [planFilter, setPlanFilter] = useState<string>('all')
 
   const selected = state.reviewRecords.find((r) => r.id === selectedId)
+
+  const filteredRecords = useMemo(() => {
+    if (planFilter === 'all') return state.reviewRecords
+    return state.reviewRecords.filter((r) => {
+      const plan = state.savedPlans.find((p) => p.id === planFilter)
+      if (!plan) return true
+      return r.createdAt >= plan.createdAt - 86400000 && r.createdAt <= plan.createdAt + 86400000
+    })
+  }, [state.reviewRecords, planFilter, state.savedPlans])
 
   const newRecord: Partial<ReviewRecord> = {
     date: state.currentDate,
@@ -33,10 +44,11 @@ export default function ReviewWindow({ onNavigate }: Props) {
     notes: '',
     approval: 'pending',
     approver: '',
+    history: [],
   }
 
   const deviationChartData = useMemo(() => {
-    const sorted = [...state.reviewRecords].sort((a, b) => a.date.localeCompare(b.date))
+    const sorted = [...filteredRecords].sort((a, b) => a.date.localeCompare(b.date))
     return {
       labels: sorted.map((r) => r.date.slice(5)),
       datasets: [
@@ -69,10 +81,10 @@ export default function ReviewWindow({ onNavigate }: Props) {
         },
       ],
     }
-  }, [state.reviewRecords])
+  }, [filteredRecords])
 
   const costChartData = useMemo(() => {
-    const sorted = [...state.reviewRecords].sort((a, b) => a.date.localeCompare(b.date))
+    const sorted = [...filteredRecords].sort((a, b) => a.date.localeCompare(b.date))
     return {
       labels: sorted.map((r) => r.date.slice(5)),
       datasets: [
@@ -98,7 +110,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
         },
       ],
     }
-  }, [state.reviewRecords])
+  }, [filteredRecords])
 
   const chartOptions = {
     responsive: true,
@@ -123,18 +135,16 @@ export default function ReviewWindow({ onNavigate }: Props) {
     },
   }
 
-  const [approvalRemark, setApprovalRemark] = useState('')
-
   const stats = useMemo(() => {
-    const n = state.reviewRecords.length
+    const n = filteredRecords.length
     if (n === 0) return { avgDev: 0, avgCost: 0, overCount: 0, approved: 0 }
     return {
-      avgDev: (state.reviewRecords.reduce((a, b) => a + Math.abs(b.deviationRate), 0) / n).toFixed(2),
-      avgCost: Math.round(state.reviewRecords.reduce((a, b) => a + b.actualCost, 0) / n),
-      overCount: state.reviewRecords.filter((r) => r.deviationRate > 0).length,
-      approved: state.reviewRecords.filter((r) => r.approval === 'approved').length,
+      avgDev: (filteredRecords.reduce((a, b) => a + Math.abs(b.deviationRate), 0) / n).toFixed(2),
+      avgCost: Math.round(filteredRecords.reduce((a, b) => a + b.actualCost, 0) / n),
+      overCount: filteredRecords.filter((r) => r.deviationRate > 0).length,
+      approved: filteredRecords.filter((r) => r.approval === 'approved').length,
     }
-  }, [state.reviewRecords])
+  }, [filteredRecords])
 
   const fmtTime = (ts: number) => ts ? new Date(ts).toLocaleString('zh-CN') : '-'
 
@@ -142,14 +152,15 @@ export default function ReviewWindow({ onNavigate }: Props) {
     const headers = [
       '日期', '计划负荷(kWh)', '实际负荷(kWh)', '偏差(kWh)', '偏差率(%)',
       '计划费用(¥)', '实际费用(¥)', '费用差异(¥)', '偏差原因', '改进备注',
-      '审批状态', '审批人', '审批意见', '审批时间', '创建时间',
+      '审批状态', '审批人', '审批意见', '审批时间', '创建时间', '修改留痕',
     ]
-    const rows = state.reviewRecords.map((r) => [
+    const rows = filteredRecords.map((r) => [
       r.date, r.plannedLoad, r.actualLoad, r.deviation, r.deviationRate.toFixed(2) + '%',
       r.plannedCost, r.actualCost, r.actualCost - r.plannedCost,
       r.reason, r.notes,
       APPROVAL_LABELS[r.approval].text, r.approver || '-', r.approvalRemark || '-',
       fmtTime(r.approvalAt), fmtTime(r.createdAt),
+      r.history.map((h) => `[${fmtTime(h.timestamp)}] ${h.operator} ${h.field}: "${h.oldValue}" → "${h.newValue}"`).join(' | '),
     ])
     const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
@@ -175,21 +186,21 @@ export default function ReviewWindow({ onNavigate }: Props) {
           <div className="metric-label">💰 日均实际费用</div>
           <div className="metric-value">¥{stats.avgCost.toLocaleString()}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            较计划 {((stats.avgCost / (state.reviewRecords.reduce((a, b) => a + b.plannedCost, 0) / state.reviewRecords.length) - 1) * 100).toFixed(1)}%
+            较计划 {filteredRecords.length > 0 ? ((stats.avgCost / (filteredRecords.reduce((a, b) => a + b.plannedCost, 0) / filteredRecords.length) - 1) * 100).toFixed(1) : 0}%
           </div>
         </div>
         <div className="metric-card">
           <div className="metric-label">📈 超计划天数</div>
-          <div className="metric-value">{stats.overCount}<span className="metric-unit">/{state.reviewRecords.length}天</span></div>
-          <div style={{ fontSize: 11, color: stats.overCount > state.reviewRecords.length / 2 ? 'var(--accent-red)' : 'var(--text-muted)' }}>
-            {stats.overCount > state.reviewRecords.length / 2 ? '需加强成本控制' : '总体控制良好'}
+          <div className="metric-value">{stats.overCount}<span className="metric-unit">/{filteredRecords.length}天</span></div>
+          <div style={{ fontSize: 11, color: stats.overCount > filteredRecords.length / 2 ? 'var(--accent-red)' : 'var(--text-muted)' }}>
+            {stats.overCount > filteredRecords.length / 2 ? '需加强成本控制' : '总体控制良好'}
           </div>
         </div>
         <div className="metric-card">
           <div className="metric-label">✅ 审批通过</div>
-          <div className="metric-value">{stats.approved}<span className="metric-unit">/{state.reviewRecords.length}份</span></div>
+          <div className="metric-value">{stats.approved}<span className="metric-unit">/{filteredRecords.length}份</span></div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            通过率 {state.reviewRecords.length > 0 ? ((stats.approved / state.reviewRecords.length) * 100).toFixed(0) : 0}%
+            通过率 {filteredRecords.length > 0 ? ((stats.approved / filteredRecords.length) * 100).toFixed(0) : 0}%
           </div>
         </div>
       </div>
@@ -215,10 +226,13 @@ export default function ReviewWindow({ onNavigate }: Props) {
 
       <div className="toolbar">
         <span className="toolbar-title">📋 历史复盘记录</span>
-        <div className="tabs">
-          <div className="tab active">全部 ({state.reviewRecords.length})</div>
-          <div className="tab">待审批 ({state.reviewRecords.filter((r) => r.approval === 'pending').length})</div>
-          <div className="tab">已通过 ({stats.approved})</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}>
+            <option value="all">全部复盘</option>
+            {state.savedPlans.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
         <div className="toolbar-spacer" />
         <button className="btn btn-sm" onClick={() => onNavigate?.('forecast')}>📈 查看预测模型</button>
@@ -245,7 +259,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {state.reviewRecords.map((r) => (
+                {filteredRecords.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => {
@@ -393,6 +407,23 @@ export default function ReviewWindow({ onNavigate }: Props) {
                 </div>
               )}
 
+              {selected.history && selected.history.length > 0 && (
+                <div style={{ padding: 12, background: 'var(--bg-primary)', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>📜 修改留痕时间线</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {selected.history.map((h: ReviewHistoryEntry, i: number) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, padding: '6px 8px', background: 'var(--bg-tertiary)', borderRadius: 4 }}>
+                        <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', minWidth: 120 }}>{new Date(h.timestamp).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                        <span style={{ color: 'var(--accent-cyan)', fontWeight: 600, minWidth: 50 }}>{h.operator}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>
+                          <span style={{ fontWeight: 600 }}>{h.field}</span>：{h.oldValue ? <span style={{ textDecoration: 'line-through', color: 'var(--accent-red)' }}>{h.oldValue}</span> : <span style={{ color: 'var(--text-muted)' }}>（空）</span>} → {h.newValue}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn btn-sm" onClick={() => onNavigate?.('schedule')}>📅 参考排程</button>
                 <button className="btn btn-sm btn-primary" onClick={() => {
@@ -463,6 +494,7 @@ export default function ReviewWindow({ onNavigate }: Props) {
                   deviation: al - pl, deviationRate: ((al - pl) / pl) * 100,
                   plannedCost: pc, actualCost: ac,
                   reason, notes, approval: 'pending', approver: '', approvalRemark: '', approvalAt: 0, createdAt: Date.now(),
+                  history: [{ timestamp: Date.now(), field: '创建记录', oldValue: '', newValue: `计划${pl}kWh/实际${al}kWh`, operator: '操作员' }],
                 }
                 state.addReviewRecord(rec)
                 setSelectedId(rec.id)

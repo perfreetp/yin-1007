@@ -25,6 +25,11 @@ export default function ScheduleWindow({ onNavigate }: Props) {
   const [dragging, setDragging] = useState<{ id: string; startX: number; origStart: number } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showStoragePanel, setShowStoragePanel] = useState(false)
+  const [showPlanPanel, setShowPlanPanel] = useState(false)
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [planName, setPlanName] = useState('')
+  const [planNote, setPlanNote] = useState('')
+  const [compareIds, setCompareIds] = useState<[string, string] | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const sortedSchedules = useMemo(() => {
@@ -49,9 +54,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
       const start = Math.max(0, Math.floor(s.startHour))
       const end = Math.min(TOTAL_HOURS, Math.ceil(s.endHour))
       const load = Math.max(0, s.power)
-      for (let h = start; h < end; h++) {
-        arr[h] += load
-      }
+      for (let h = start; h < end; h++) arr[h] += load
     })
     return arr
   }, [state.schedules])
@@ -61,40 +64,77 @@ export default function ScheduleWindow({ onNavigate }: Props) {
     state.schedules.forEach((s) => {
       const start = Math.max(0, Math.floor(s.startHour))
       const end = Math.min(TOTAL_HOURS, Math.ceil(s.endHour))
-      for (let h = start; h < end; h++) {
-        arr[h] += s.power
-      }
+      for (let h = start; h < end; h++) arr[h] += s.power
     })
     const forecast = state.loadForecast.map((f) => f.electricity)
     return arr.map((v, i) => (forecast[i] || 0) * 0.6 + v * 0.4)
   }, [state.schedules, state.loadForecast])
 
-  const chartData = {
-    labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
-    datasets: [
-      {
-        type: 'line' as const,
-        label: '综合负荷 (kW)',
-        data: netCurve,
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59,130,246,0.15)',
-        fill: true,
-        tension: 0.35,
-        pointRadius: 0,
-        borderWidth: 2,
-      },
-      {
-        type: 'line' as const,
-        label: '需量红线',
-        data: Array(24).fill(state.demandRedLine),
-        borderColor: '#ef4444',
-        borderDash: [6, 4],
-        pointRadius: 0,
-        borderWidth: 2,
-        fill: false,
-      },
-    ],
-  }
+  const compareDiff = useMemo(() => {
+    if (!compareIds) return null
+    const planA = state.savedPlans.find((p) => p.id === compareIds[0])
+    const planB = state.savedPlans.find((p) => p.id === compareIds[1])
+    if (!planA || !planB) return null
+    const diffItems: { name: string; type: string; field: string; aVal: string; bVal: string }[] = []
+    const allIds = new Set([...planA.schedules.map((s) => s.id), ...planB.schedules.map((s) => s.id)])
+    allIds.forEach((id) => {
+      const a = planA.schedules.find((s) => s.id === id)
+      const b = planB.schedules.find((s) => s.id === id)
+      if (!a && b) diffItems.push({ name: b.name, type: b.type, field: '新增', aVal: '-', bVal: `${fmtH(b.startHour)}-${fmtH(b.endHour)}` })
+      else if (a && !b) diffItems.push({ name: a.name, type: a.type, field: '移除', aVal: `${fmtH(a.startHour)}-${fmtH(a.endHour)}`, bVal: '-' })
+      else if (a && b) {
+        if (a.startHour !== b.startHour || a.endHour !== b.endHour)
+          diffItems.push({ name: a.name, type: a.type, field: '时段变更', aVal: `${fmtH(a.startHour)}-${fmtH(a.endHour)}`, bVal: `${fmtH(b.startHour)}-${fmtH(b.endHour)}` })
+        if (a.power !== b.power)
+          diffItems.push({ name: a.name, type: a.type, field: '功率变更', aVal: `${a.power}kW`, bVal: `${b.power}kW` })
+      }
+    })
+    const curveA = new Array(24).fill(0)
+    const curveB = new Array(24).fill(0)
+    planA.schedules.forEach((s) => { for (let h = Math.max(0, Math.floor(s.startHour)); h < Math.min(24, Math.ceil(s.endHour)); h++) curveA[h] += s.power })
+    planB.schedules.forEach((s) => { for (let h = Math.max(0, Math.floor(s.startHour)); h < Math.min(24, Math.ceil(s.endHour)); h++) curveB[h] += s.power })
+    return { diffItems, curveA, curveB, planA, planB }
+  }, [compareIds, state.savedPlans])
+
+  const chartData = useMemo(() => {
+    if (compareDiff) {
+      return {
+        labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+        datasets: [
+          {
+            type: 'line' as const, label: `${compareDiff.planA.name} 负荷`, data: compareDiff.curveA,
+            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: false, tension: 0.35, pointRadius: 0, borderWidth: 2,
+          },
+          {
+            type: 'line' as const, label: `${compareDiff.planB.name} 负荷`, data: compareDiff.curveB,
+            borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', fill: false, tension: 0.35, pointRadius: 0, borderWidth: 2,
+          },
+          {
+            type: 'bar' as const, label: '差异', data: compareDiff.curveB.map((v, i) => v - compareDiff.curveA[i]),
+            backgroundColor: compareDiff.curveB.map((v, i) => v - compareDiff.curveA[i] > 0 ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'),
+            borderRadius: 2,
+          },
+          {
+            type: 'line' as const, label: '需量红线', data: Array(24).fill(state.demandRedLine),
+            borderColor: '#ef4444', borderDash: [6, 4], pointRadius: 0, borderWidth: 2, fill: false,
+          },
+        ],
+      }
+    }
+    return {
+      labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+      datasets: [
+        {
+          type: 'line' as const, label: '综合负荷 (kW)', data: netCurve,
+          borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.15)', fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2,
+        },
+        {
+          type: 'line' as const, label: '需量红线', data: Array(24).fill(state.demandRedLine),
+          borderColor: '#ef4444', borderDash: [6, 4], pointRadius: 0, borderWidth: 2, fill: false,
+        },
+      ],
+    }
+  }, [netCurve, state.demandRedLine, compareDiff])
 
   const chartOptions = {
     responsive: true,
@@ -134,7 +174,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
 
   const onMouseUp = () => setDragging(null)
 
-  const formatH = (h: number) => {
+  function fmtH(h: number) {
     const hr = Math.floor(h)
     const min = Math.round((h - hr) * 60)
     return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`
@@ -147,6 +187,8 @@ export default function ScheduleWindow({ onNavigate }: Props) {
     state.removeSchedule(selectedId)
     setSelectedId(null)
   }
+
+  const activePlan = state.savedPlans.find((p) => p.id === state.activePlanId)
 
   return (
     <div
@@ -165,9 +207,11 @@ export default function ScheduleWindow({ onNavigate }: Props) {
           <span className="legend-item"><span className="swatch" style={{ background: '#8B5CF6' }} />空压机</span>
         </div>
         <div className="toolbar-spacer" />
+        {activePlan && <span className="tag tag-blue">📋 {activePlan.name}</span>}
         <span className={`tag ${overDemand ? 'tag-red' : 'tag-green'}`}>峰值 {peakLoad.toFixed(0)}kW / 红线 {state.demandRedLine}kW</span>
         <span className="tag tag-blue">本日预估 ¥{totalCost.toFixed(0)}</span>
         <button className="btn btn-sm" onClick={() => setShowStoragePanel(!showStoragePanel)}>🔋 储能控制</button>
+        <button className="btn btn-sm" onClick={() => setShowPlanPanel(!showPlanPanel)}>📋 方案管理</button>
         <button className="btn btn-sm btn-primary" onClick={() => onNavigate?.('cost')}>成本对比 →</button>
       </div>
 
@@ -184,7 +228,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
         <div className="metric-card">
           <div className="metric-label">🔋 总耗电量</div>
           <div className="metric-value">{totalKwh.toFixed(0)}<span className="metric-unit">kWh</span></div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>含储能净放电 {state.storageSchedules.reduce((a, b) => a + (b.dischargeEnd - b.dischargeStart) * 300, 0)}kWh</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>含储能净放电 {state.storageSchedules.reduce((a, b) => a + (b.dischargeEnd - b.dischargeStart) * 300, 0).toFixed(0)}kWh</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">💵 预估电费</div>
@@ -203,7 +247,7 @@ export default function ScheduleWindow({ onNavigate }: Props) {
       {showStoragePanel && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">🔋 储能系统调度（两组电池）</div>
+            <div className="card-title">🔋 储能系统调度（两组电池分别控制）</div>
             <button className="btn btn-sm" onClick={() => setShowStoragePanel(false)}>收起</button>
           </div>
           <div className="grid grid-2">
@@ -213,30 +257,119 @@ export default function ScheduleWindow({ onNavigate }: Props) {
                   <span style={{ fontWeight: 600 }}>储能组 #{idx + 1}</span>
                   <span className="tag tag-green">容量 {st.capacity} kWh</span>
                 </div>
-                <div className="form-row"><label>谷段充电</label>
+                <div className="form-row"><label>充电时段（谷段）</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} value={st.chargeStart} style={{ width: 80 }}
+                    <input type="number" min={0} max={24} step={0.5} value={st.chargeStart} style={{ width: 80 }}
                       onChange={(e) => state.updateStorageSchedule({ ...st, chargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span>—</span>
-                    <input type="number" min={0} max={24} value={st.chargeEnd} style={{ width: 80 }}
+                    <input type="number" min={0} max={24} step={0.5} value={st.chargeEnd} style={{ width: 80 }}
                       onChange={(e) => state.updateStorageSchedule({ ...st, chargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
                   </div>
                 </div>
-                <div className="form-row"><label>尖峰放电</label>
+                <div className="form-row"><label>放电时段（尖峰）</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min={0} max={24} value={st.dischargeStart} style={{ width: 80 }}
+                    <input type="number" min={0} max={24} step={0.5} value={st.dischargeStart} style={{ width: 80 }}
                       onChange={(e) => state.updateStorageSchedule({ ...st, dischargeStart: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span>—</span>
-                    <input type="number" min={0} max={24} value={st.dischargeEnd} style={{ width: 80 }}
+                    <input type="number" min={0} max={24} step={0.5} value={st.dischargeEnd} style={{ width: 80 }}
                       onChange={(e) => state.updateStorageSchedule({ ...st, dischargeEnd: Math.max(0, Math.min(24, Number(e.target.value))) })} />
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>时</span>
                   </div>
                 </div>
-                <div className="stat-row"><span className="stat-label">当前电量SOC</span><span className="stat-value">{((st.currentLevel / st.capacity) * 100).toFixed(0)}% ({st.currentLevel}kWh)</span></div>
+                <div className="stat-row"><span className="stat-label">充电量</span><span className="stat-value">{((st.chargeEnd - st.chargeStart) * 500).toFixed(0)} kWh</span></div>
+                <div className="stat-row"><span className="stat-label">放电量</span><span className="stat-value">{((st.dischargeEnd - st.dischargeStart) * 400).toFixed(0)} kWh</span></div>
+                <div className="stat-row"><span className="stat-label">当前SOC</span><span className="stat-value">{((st.currentLevel / st.capacity) * 100).toFixed(0)}% ({st.currentLevel}kWh)</span></div>
                 <div className="progress-bar"><div className="progress-fill" style={{ width: `${(st.currentLevel / st.capacity) * 100}%`, background: 'var(--accent-green)' }} /></div>
+                <div style={{ marginTop: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {state.schedules.filter((s) => s.type === 'storage' && s.id.endsWith(String(idx + 1))).map((s) => (
+                    <span key={s.id} className="tag" style={{ fontSize: 10, background: s.color + '22', color: s.color, border: `1px solid ${s.color}44` }}>
+                      {s.name}: {fmtH(s.startHour)}–{fmtH(s.endHour)}
+                    </span>
+                  ))}
+                </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {showPlanPanel && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">📋 方案版本管理</div>
+            <button className="btn btn-sm" onClick={() => setShowPlanPanel(false)}>收起</button>
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <button className="btn btn-sm btn-primary" onClick={() => { setPlanName(''); setPlanNote(''); setShowSaveDialog(true) }}>💾 另存当前方案</button>
+                <button className="btn btn-sm" onClick={() => setCompareIds(null)} disabled={!compareIds}>退出对比</button>
+              </div>
+              {state.savedPlans.length === 0 ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  尚未保存方案快照，调整完排程后点击「另存当前方案」
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {state.savedPlans.map((p) => (
+                    <div key={p.id} style={{
+                      padding: '8px 12px', background: state.activePlanId === p.id ? 'rgba(59,130,246,0.15)' : 'var(--bg-primary)',
+                      border: `1px solid ${state.activePlanId === p.id ? 'var(--accent-blue)' : 'var(--border)'}`,
+                      borderRadius: 8, minWidth: 140, cursor: 'pointer',
+                    }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{p.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6 }}>
+                        {new Date(p.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        {p.note && ` · ${p.note.slice(0, 15)}`}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                        费用 ¥{p.costSnapshot.totalCost.toLocaleString()} · 峰值 {p.costSnapshot.peakDemand}kW
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                        <button className="btn btn-sm" style={{ fontSize: 10, padding: '2px 6px' }}
+                          onClick={() => state.loadPlan(p.id)}>加载</button>
+                        <button className="btn btn-sm" style={{ fontSize: 10, padding: '2px 6px' }}
+                          onClick={() => {
+                            if (compareIds) {
+                              setCompareIds([compareIds[0], p.id])
+                            } else {
+                              setCompareIds([p.id, ''])
+                            }
+                          }}>对比</button>
+                        <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: '2px 6px' }}
+                          onClick={() => { state.deletePlan(p.id); if (compareIds && compareIds[0] === p.id) setCompareIds(null) }}>删除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {compareIds && compareIds[1] && compareDiff && (
+                <div style={{ marginTop: 12, padding: 12, background: 'var(--bg-primary)', borderRadius: 8, border: '1px solid var(--accent-orange)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: 'var(--accent-orange)' }}>
+                    🔄 方案对比：{compareDiff.planA.name} ↔ {compareDiff.planB.name}
+                  </div>
+                  {compareDiff.diffItems.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>两版方案排程完全一致，无差异</div>
+                  ) : (
+                    <table style={{ width: '100%', fontSize: 11 }}>
+                      <thead><tr><th>项目</th><th>类型</th><th>差异类型</th><th>{compareDiff.planA.name}</th><th>{compareDiff.planB.name}</th></tr></thead>
+                      <tbody>
+                        {compareDiff.diffItems.map((d, i) => (
+                          <tr key={i}>
+                            <td>{d.name}</td>
+                            <td>{d.type}</td>
+                            <td><span className={`tag ${d.field === '新增' ? 'tag-green' : d.field === '移除' ? 'tag-red' : 'tag-yellow'}`}>{d.field}</span></td>
+                            <td>{d.aVal}</td>
+                            <td style={{ color: d.aVal !== d.bVal ? 'var(--accent-orange)' : undefined }}>{d.bVal}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -245,12 +378,12 @@ export default function ScheduleWindow({ onNavigate }: Props) {
         <div className="card-header" style={{ padding: '10px 14px' }}>
           <div>
             <div className="card-title">甘特图拖拽区（按住左键拖动任务块）</div>
-            <div className="card-subtitle">红色虚线为需量红线，青线为当前时间</div>
+            <div className="card-subtitle">红色虚线为需量红线，青线为当前时间{compareIds ? ' · 对比模式下橙色条为差异项' : ''}</div>
           </div>
           {selectedItem && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span className="tag tag-blue">
-                {selectedItem.name} · {formatH(selectedItem.startHour)}-{formatH(selectedItem.endHour)} · {Math.abs(selectedItem.power)}kW
+                {selectedItem.name} · {fmtH(selectedItem.startHour)}-{fmtH(selectedItem.endHour)} · {Math.abs(selectedItem.power)}kW
               </span>
               <button className="btn btn-sm btn-danger" onClick={removeSelected}>删除</button>
             </div>
@@ -292,49 +425,53 @@ export default function ScheduleWindow({ onNavigate }: Props) {
 
                 {items.length === 0 ? (
                   <div style={{ gridColumn: `1 / ${TOTAL_HOURS + 2}`, padding: '14px 20px', fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                    暂无排程项，点击上方"新增排程"添加
+                    暂无排程项
                   </div>
                 ) : (
-                  items.map((item, rowIdx) => (
-                    <div key={item.id + rowIdx} className="gantt-row" style={{ gridTemplateColumns: `subgrid` }}>
-                      <div className="gantt-label" title={item.name} style={{ minHeight: ROW_HEIGHT, display: 'flex', alignItems: 'center' }}>
-                        {item.name}
-                        <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)' }}>
-                          {Math.abs(item.power)}kW
-                        </span>
-                      </div>
-                      {Array.from({ length: TOTAL_HOURS }, (_, h) => (
-                        <div key={h} className="gantt-track" style={{ height: ROW_HEIGHT, position: 'relative' }}>
-                          {h === state.energyPrice.peakHours[0] && (
-                            <div className="gantt-red-line" style={{ left: 0 }} />
-                          )}
-                          {h === new Date().getHours() && (
-                            <div className="now-line" style={{ left: `${HOUR_WIDTH * (new Date().getMinutes() / 60)}px` }} />
-                          )}
+                  items.map((item, rowIdx) => {
+                    const isDiff = compareDiff && compareDiff.diffItems.some((d) => d.name === item.name)
+                    return (
+                      <div key={item.id + rowIdx} className="gantt-row" style={{ gridTemplateColumns: `subgrid` }}>
+                        <div className="gantt-label" title={item.name} style={{ minHeight: ROW_HEIGHT, display: 'flex', alignItems: 'center' }}>
+                          {item.name}
+                          <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-muted)' }}>
+                            {Math.abs(item.power)}kW
+                          </span>
                         </div>
-                      ))}
-                      <div
-                        className={`gantt-bar ${dragging?.id === item.id ? 'dragging' : ''}`}
-                        style={{
-                          gridColumn: '2 / -1',
-                          position: 'absolute',
-                          left: LABEL_WIDTH + item.startHour * HOUR_WIDTH + 2,
-                          width: Math.max(HOUR_WIDTH * 0.6, (item.endHour - item.startHour) * HOUR_WIDTH - 4),
-                          top: rowIdx === 0 ? 4 : undefined,
-                          background: item.color,
-                          opacity: selectedId && selectedId !== item.id ? 0.6 : 1,
-                          outline: selectedId === item.id ? '2px solid #fff' : 'none',
-                        }}
-                        onMouseDown={(e) => onMouseDown(e, item)}
-                        onClick={() => setSelectedId(item.id)}
-                      >
-                        <span style={{ fontSize: 11, fontWeight: 500 }}>
-                          {formatH(item.startHour)}–{formatH(item.endHour)}
-                          {item.type === 'storage' ? (item.power < 0 ? ' 充' : ' 放') : ''}
-                        </span>
+                        {Array.from({ length: TOTAL_HOURS }, (_, h) => (
+                          <div key={h} className="gantt-track" style={{ height: ROW_HEIGHT, position: 'relative' }}>
+                            {h === state.energyPrice.peakHours[0] && (
+                              <div className="gantt-red-line" style={{ left: 0 }} />
+                            )}
+                            {h === new Date().getHours() && (
+                              <div className="now-line" style={{ left: `${HOUR_WIDTH * (new Date().getMinutes() / 60)}px` }} />
+                            )}
+                          </div>
+                        ))}
+                        <div
+                          className={`gantt-bar ${dragging?.id === item.id ? 'dragging' : ''}`}
+                          style={{
+                            gridColumn: '2 / -1',
+                            position: 'absolute',
+                            left: LABEL_WIDTH + item.startHour * HOUR_WIDTH + 2,
+                            width: Math.max(HOUR_WIDTH * 0.6, (item.endHour - item.startHour) * HOUR_WIDTH - 4),
+                            top: rowIdx === 0 ? 4 : undefined,
+                            background: isDiff ? '#f97316' : item.color,
+                            outline: isDiff ? '2px solid #f97316' : selectedId === item.id ? '2px solid #fff' : 'none',
+                            opacity: selectedId && selectedId !== item.id ? 0.6 : 1,
+                          }}
+                          onMouseDown={(e) => onMouseDown(e, item)}
+                          onClick={() => setSelectedId(item.id)}
+                        >
+                          <span style={{ fontSize: 11, fontWeight: 500 }}>
+                            {fmtH(item.startHour)}–{fmtH(item.endHour)}
+                            {item.type === 'storage' ? (item.power < 0 ? ' 充' : ' 放') : ''}
+                            {isDiff ? ' ⚡' : ''}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             ))}
@@ -344,16 +481,49 @@ export default function ScheduleWindow({ onNavigate }: Props) {
 
       <div className="card" style={{ flexShrink: 0 }}>
         <div className="card-header">
-          <div className="card-title">📈 排程后负荷曲线预览</div>
+          <div className="card-title">📈 排程后负荷曲线预览{compareDiff ? '（对比模式）' : ''}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-sm" onClick={() => onNavigate?.('alerts')}>⚠️ 查看告警</button>
-            <button className="btn btn-sm btn-success" onClick={() => onNavigate?.('review')}>✅ 保存排程方案</button>
+            <button className="btn btn-sm btn-success" onClick={() => { setPlanName(`方案_${state.savedPlans.length + 1}`); setPlanNote(''); setShowSaveDialog(true) }}>💾 保存排程方案</button>
           </div>
         </div>
         <div style={{ height: 160 }}>
-          <Line data={chartData} options={chartOptions} />
+          <Line data={chartData as any} options={chartOptions} />
         </div>
       </div>
+
+      {showSaveDialog && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            width: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 20, boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          }}>
+            <div className="card-header" style={{ marginTop: -4 }}><div className="card-title">💾 另存方案快照</div></div>
+            <div className="form-row" style={{ marginTop: 12 }}>
+              <label>方案名称 *</label>
+              <input value={planName} onChange={(e) => setPlanName(e.target.value)} placeholder="如：削峰填谷方案V2" />
+            </div>
+            <div className="form-row" style={{ marginTop: 8 }}>
+              <label>备注说明</label>
+              <textarea value={planNote} onChange={(e) => setPlanNote(e.target.value)} placeholder="记录方案调整要点、适用场景等..." style={{ minHeight: 60 }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+              将保存当前 {state.schedules.length} 项排程 + {state.storageSchedules.length} 组储能的完整快照，预估费用 ¥{totalCost.toFixed(0)}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <button className="btn" onClick={() => setShowSaveDialog(false)}>取消</button>
+              <button className="btn btn-primary" disabled={!planName.trim()} onClick={() => {
+                state.savePlan(planName.trim(), planNote)
+                setShowSaveDialog(false)
+                setShowPlanPanel(true)
+              }}>保存方案</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

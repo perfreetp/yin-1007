@@ -16,22 +16,28 @@ const RISK_LABELS: Record<CostPlan['riskLevel'], { text: string; cls: string }> 
 export default function CostWindow({ onNavigate }: Props) {
   const state = useEnergyStore()
   const [selectedId, setSelectedId] = useState<string>(state.selectedPlanId || state.costPlans[1].id)
+  const [viewMode, setViewMode] = useState<'preset' | 'saved'>('preset')
 
-  const baseline = state.costPlans[0]
-  const selected = state.costPlans.find((p) => p.id === selectedId) || baseline
+  const allPlans = useMemo(() => {
+    if (viewMode === 'preset') return state.costPlans
+    return state.savedPlans.map((p) => p.costSnapshot)
+  }, [viewMode, state.costPlans, state.savedPlans])
+
+  const baseline = allPlans[0]
+  const selected = allPlans.find((p) => p.id === selectedId) || baseline
 
   const compareBarData = useMemo(() => ({
-    labels: state.costPlans.map((p) => p.name.split('（')[0]),
+    labels: allPlans.map((p) => p.name.split('（')[0]),
     datasets: [
-      { label: '电费 (¥)', data: state.costPlans.map((p) => p.electricityCost), backgroundColor: 'rgba(59,130,246,0.75)', borderRadius: 4, stack: 'cost' },
-      { label: '蒸汽费 (¥)', data: state.costPlans.map((p) => p.steamCost), backgroundColor: 'rgba(249,115,22,0.75)', borderRadius: 4, stack: 'cost' },
-      { label: '压空费 (¥)', data: state.costPlans.map((p) => p.airCost), backgroundColor: 'rgba(139,92,246,0.75)', borderRadius: 4, stack: 'cost' },
+      { label: '电费 (¥)', data: allPlans.map((p) => p.electricityCost), backgroundColor: 'rgba(59,130,246,0.75)', borderRadius: 4, stack: 'cost' },
+      { label: '蒸汽费 (¥)', data: allPlans.map((p) => p.steamCost), backgroundColor: 'rgba(249,115,22,0.75)', borderRadius: 4, stack: 'cost' },
+      { label: '压空费 (¥)', data: allPlans.map((p) => p.airCost), backgroundColor: 'rgba(139,92,246,0.75)', borderRadius: 4, stack: 'cost' },
     ],
-  }), [state.costPlans])
+  }), [allPlans])
 
   const radarData = useMemo(() => ({
     labels: ['成本节约', '碳排降低', '风险控制', '峰值削减', '执行便利', '产能保障'],
-    datasets: state.costPlans.map((p, i) => {
+    datasets: allPlans.map((p, i) => {
       const saveRate = ((baseline.totalCost - p.totalCost) / baseline.totalCost * 100)
       const saveCarb = ((baseline.carbonEmission - p.carbonEmission) / baseline.carbonEmission * 100)
       const riskScore = p.riskLevel === 'low' ? 90 : p.riskLevel === 'medium' ? 60 : 30
@@ -46,13 +52,13 @@ export default function CostWindow({ onNavigate }: Props) {
       return {
         label: p.name.split('（')[0],
         data: [saveRate + 10, saveCarb + 5, riskScore, peakCut + 5, ease, capacity],
-        backgroundColor: colors[i].bg,
-        borderColor: colors[i].bd,
+        backgroundColor: colors[i % 3].bg,
+        borderColor: colors[i % 3].bd,
         borderWidth: 2,
         pointRadius: 3,
       }
     }),
-  }), [state.costPlans, baseline])
+  }), [allPlans, baseline])
 
   const doughnutData = useMemo(() => ({
     labels: ['电费', '蒸汽费', '压空费'],
@@ -140,7 +146,7 @@ export default function CostWindow({ onNavigate }: Props) {
       </div>
 
       <div className="grid grid-3" style={{ flex: '0 0 auto' }}>
-        {state.costPlans.map((p) => {
+        {allPlans.map((p) => {
           const save = ((baseline.totalCost - p.totalCost) / baseline.totalCost * 100).toFixed(1)
           return (
             <div
@@ -232,6 +238,15 @@ export default function CostWindow({ onNavigate }: Props) {
 
       <div className="toolbar">
         <span className="toolbar-title">📋 方案明细对比表</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select value={viewMode} onChange={(e) => { setViewMode(e.target.value as 'preset' | 'saved'); setSelectedId('') }} style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4 }}>
+            <option value="preset">预设方案对比</option>
+            <option value="saved">已保存方案快照</option>
+          </select>
+          {viewMode === 'saved' && state.savedPlans.length === 0 && (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>（尚未保存方案，请先在排程窗另存）</span>
+          )}
+        </div>
         <div className="toolbar-spacer" />
         <button className="btn btn-sm" onClick={() => onNavigate?.('schedule')}>↩️ 返回排程调整</button>
         <button className="btn btn-sm">📤 导出对比报告</button>
@@ -246,7 +261,7 @@ export default function CostWindow({ onNavigate }: Props) {
           <thead>
             <tr>
               <th>评估项</th>
-              {state.costPlans.map((p) => (
+              {allPlans.map((p) => (
                 <th key={p.id} style={selectedId === p.id ? { background: 'rgba(59,130,246,0.15)', color: '#60a5fa' } : {}}>
                   {p.name.split('（')[0]}
                   {selectedId === p.id && ' ✓'}
@@ -266,7 +281,7 @@ export default function CostWindow({ onNavigate }: Props) {
             ].map((row) => (
               <tr key={row.k}>
                 <td style={{ color: 'var(--text-secondary)' }}>{row.l}</td>
-                {state.costPlans.map((p) => {
+                {allPlans.map((p) => {
                   const pAny = p as unknown as Record<string, unknown>
                   const v = pAny[row.k] as number | string
                   const isSelected = selectedId === p.id
@@ -286,7 +301,7 @@ export default function CostWindow({ onNavigate }: Props) {
             ))}
             <tr>
               <td style={{ color: 'var(--text-secondary)' }}>方案说明</td>
-              {state.costPlans.map((p) => (
+              {allPlans.map((p) => (
                 <td key={p.id} style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.description}</td>
               ))}
             </tr>

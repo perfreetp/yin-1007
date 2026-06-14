@@ -126,6 +126,25 @@ export interface ReviewRecord {
   approvalRemark: string
   approvalAt: number
   createdAt: number
+  history: ReviewHistoryEntry[]
+}
+
+export interface ReviewHistoryEntry {
+  timestamp: number
+  field: string
+  oldValue: string
+  newValue: string
+  operator: string
+}
+
+export interface SchedulePlan {
+  id: string
+  name: string
+  note: string
+  schedules: ScheduleItem[]
+  storageSchedules: StorageSchedule[]
+  costSnapshot: CostPlan
+  createdAt: number
 }
 
 export interface AppState {
@@ -141,6 +160,8 @@ export interface AppState {
   alerts: Alert[]
   costPlans: CostPlan[]
   reviewRecords: ReviewRecord[]
+  savedPlans: SchedulePlan[]
+  activePlanId: string | null
   currentDate: string
   demandRedLine: number
   todayTotalLoad: number
